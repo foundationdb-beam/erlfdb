@@ -12,6 +12,12 @@
 
 -module(erlfdb).
 
+-if(OTP_RELEASE >= 27).
+-moduledoc """
+This module defines the primary API for interacting with a FoundationDB database.
+""".
+-endif.
+
 -compile({no_auto_import, [get/1]}).
 
 -export([
