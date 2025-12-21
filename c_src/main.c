@@ -680,9 +680,10 @@ static ERL_NIF_TERM erlfdb_future_cancel(ErlNifEnv *env, int argc,
     enif_mutex_lock(future->lock);
 
     future->cancelled = true;
-    fdb_future_cancel(future->future);
 
     enif_mutex_unlock(future->lock);
+
+    fdb_future_cancel(future->future);
 
     return ATOM_ok;
 }

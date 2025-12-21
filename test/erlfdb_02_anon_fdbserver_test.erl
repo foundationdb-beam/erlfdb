@@ -361,6 +361,23 @@ watch_test() ->
         error(timeout)
     end.
 
+watch_cancel_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    Future =
+        {erlfdb_future, MsgRef, _FRef} = erlfdb:transactional(Tenant, fun(Tx) ->
+            erlfdb:set(Tx, <<"hello_watch">>, <<"foo">>),
+            erlfdb:watch(Tx, <<"hello_watch">>)
+        end),
+    ok = erlfdb:cancel(Future, [{flush, true}]),
+    erlfdb:transactional(Tenant, fun(Tx) -> erlfdb:set(Tx, <<"hello_watch">>, <<"bar">>) end),
+    receive
+        {MsgRef, ready} ->
+            error(unexpected_ready)
+    after 100 ->
+        ok
+    end.
+
 watch_to_test() ->
     Db = erlfdb_sandbox:open(),
     Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
