@@ -678,10 +678,15 @@ static ERL_NIF_TERM erlfdb_future_cancel(ErlNifEnv *env, int argc,
     future = (ErlFDBFuture *)res;
 
     enif_mutex_lock(future->lock);
-
     future->cancelled = true;
-
     enif_mutex_unlock(future->lock);
+
+    // fdb_future_cancel is likely to call the registered callback.
+    // If not for the cancelled flag, this would lead to a segfault
+    // since pid_env is no longer valid. The cancelled flag prevents
+    // the callback from using the pid_env for enif_send. Other operations
+    // on the future may cause a synchronous callback without the
+    // flag to protect us. Use caution.
 
     fdb_future_cancel(future->future);
 

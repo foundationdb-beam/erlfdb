@@ -39,8 +39,24 @@ typedef struct _ErlFDBFuture {
     FDBFuture *future;
     ErlFDBFutureType ftype;
     ErlNifPid pid;
+
+    /* pid_env: A 'process bound environment' for sending messages
+     * in the event of the callback executing synchronously
+     * (e.g. fdb_future_cancel)
+     *
+     * Being process bound, it must not be used across different
+     * NIF calls.
+     *
+     * An alternative is to use thread-specific data (tsd) to
+     * store the environment for each NIF call.
+     */
     ErlNifEnv *pid_env;
+
+    /* msg_env: A 'process independent environment' used to send
+     * terms with enif_send.
+     */
     ErlNifEnv *msg_env;
+
     ERL_NIF_TERM msg_ref;
     ErlNifMutex *lock;
     bool cancelled;
