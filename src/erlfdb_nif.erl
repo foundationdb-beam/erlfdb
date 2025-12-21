@@ -43,6 +43,8 @@ The NIF wrapper around all FoundationDB C API function calls.
     database_set_option/2,
     database_set_option/3,
     database_create_transaction/1,
+    database_get_main_thread_busyness/1,
+    database_get_client_status/1,
     tenant_create_transaction/1,
 
     transaction_set_option/2,
@@ -308,6 +310,14 @@ database_set_option({erlfdb_database, Db}, Opt, Val) ->
 database_create_transaction({erlfdb_database, Db}) ->
     erlfdb_database_create_transaction(Db).
 
+-spec database_get_main_thread_busyness(database()) -> float().
+database_get_main_thread_busyness({erlfdb_database, Db}) ->
+    erlfdb_database_get_main_thread_busyness(Db).
+
+-spec database_get_client_status(database()) -> future().
+database_get_client_status({erlfdb_database, Db}) ->
+    erlfdb_database_get_client_status(Db).
+
 -spec tenant_create_transaction(tenant()) -> transaction().
 tenant_create_transaction({erlfdb_tenant, T}) ->
     erlfdb_tenant_create_transaction(T).
@@ -523,7 +533,7 @@ transaction_add_conflict_range(
 ) ->
     erlfdb_transaction_add_conflict_range(Tx, StartKey, EndKey, ConflictType).
 
--spec transaction_get_approximate_size(transaction()) -> non_neg_integer().
+-spec transaction_get_approximate_size(transaction()) -> future().
 transaction_get_approximate_size({erlfdb_transaction, Tx}) ->
     erlfdb_transaction_get_approximate_size(Tx).
 
@@ -663,6 +673,8 @@ erlfdb_create_database(_ClusterFilePath) -> ?NOT_LOADED.
 erlfdb_database_open_tenant(_Database, _TenantName) -> ?NOT_LOADED.
 erlfdb_database_set_option(_Database, _DatabaseOption, _Value) -> ?NOT_LOADED.
 erlfdb_database_create_transaction(_Database) -> ?NOT_LOADED.
+erlfdb_database_get_main_thread_busyness(_Database) -> ?NOT_LOADED.
+erlfdb_database_get_client_status(_Database) -> ?NOT_LOADED.
 erlfdb_tenant_create_transaction(_Tenant) -> ?NOT_LOADED.
 
 % Transactions

@@ -193,6 +193,8 @@ iex> :erlfdb.transactional(db, fn tx ->
     get_writes_allowed/1,
 
     % Locality and Statistics
+    get_main_thread_busyness/1,
+    get_client_status/1,
     get_addresses_for_key/2,
     get_estimated_range_size/3,
 
@@ -1917,7 +1919,7 @@ Gets the approximate transaction size so far.
 *C API function*: [`fdb_transaction_get_approximate_size`](https://apple.github.io/foundationdb/api-c.html#c.fdb_transaction_get_approximate_size)
 """.
 -endif.
--spec get_approximate_size(transaction() | snapshot()) -> non_neg_integer().
+-spec get_approximate_size(transaction() | snapshot()) -> future().
 get_approximate_size(?IS_TX = Tx) ->
     erlfdb_nif:transaction_get_approximate_size(Tx);
 get_approximate_size(?IS_SS = SS) ->
@@ -1991,6 +1993,28 @@ get_writes_allowed(?IS_TX = Tx) ->
     erlfdb_nif:transaction_get_writes_allowed(Tx);
 get_writes_allowed(?IS_SS = SS) ->
     get_writes_allowed(?GET_TX(SS)).
+
+-if(?DOCATTRS).
+-doc """
+Returns a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.
+
+*C API function*: [`fdb_database_get_main_thread_busyness`](https://apple.github.io/foundationdb/api-c.html#c.fdb_database_get_main_thread_busyness)
+""".
+-endif.
+-spec get_main_thread_busyness(database()) -> float().
+get_main_thread_busyness(?IS_DB = Db) ->
+    erlfdb_nif:database_get_main_thread_busyness(Db).
+
+-if(?DOCATTRS).
+-doc """
+Returns a JSON binary-string containing database client-side status information.
+
+*C API function*: [`fdb_database_get_client_status`](https://apple.github.io/foundationdb/api-c.html#c.fdb_database_get_client_status)
+""".
+-endif.
+-spec get_client_status(database()) -> future().
+get_client_status(?IS_DB = Db) ->
+    erlfdb_nif:database_get_client_status(Db).
 
 -if(?DOCATTRS).
 -doc """

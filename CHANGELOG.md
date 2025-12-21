@@ -6,6 +6,7 @@
 
   * (#57) Improve performance of the Tuple layer's encoding and decoding of strings/binaries.
   * (#50) Add support for caller to provide local target pid for watch and get_versionstamp ready messages. (e.g, `erlfdb:watch(Tx, <<"key>>, [{to, Pid}])`)
+  * (#61) Add `erlfdb:get_main_thread_busyness/1` and `erlfdb:get_client_status/1`.
 
 ## v0.3.2 (2025-06-13)
 

@@ -31,6 +31,19 @@ get_db_test() ->
         ?assert(true)
     end).
 
+db_client_info_test() ->
+    Db = erlfdb_sandbox:open(),
+    Busyness = erlfdb:get_main_thread_busyness(Db),
+    ?assert(is_float(Busyness)),
+    Vsn = erlfdb_nif:get_max_api_version(),
+    if
+        Vsn >= 730 ->
+            Status = erlfdb:wait(erlfdb:get_client_status(Db)),
+            ?assert(is_binary(Status));
+        true ->
+            ok
+    end.
+
 get_set_get_test() ->
     Db = erlfdb_sandbox:open(),
     get_set_get(Db).

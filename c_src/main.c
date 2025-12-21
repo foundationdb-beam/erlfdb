@@ -1005,6 +1005,60 @@ erlfdb_database_create_transaction(ErlNifEnv *env, int argc,
 }
 
 static ERL_NIF_TERM
+erlfdb_database_get_main_thread_busyness(ErlNifEnv *env, int argc,
+                                         const ERL_NIF_TERM argv[]) {
+    ErlFDBSt *st = (ErlFDBSt *)enif_priv_data(env);
+    ErlFDBDatabase *d;
+    void *res;
+    double busyness;
+
+    if (st->lib_state != ErlFDB_CONNECTED) {
+        return enif_make_badarg(env);
+    }
+
+    if (argc != 1) {
+        return enif_make_badarg(env);
+    }
+
+    if (!enif_get_resource(env, argv[0], ErlFDBDatabaseRes, &res)) {
+        return enif_make_badarg(env);
+    }
+    d = (ErlFDBDatabase *)res;
+
+    busyness = fdb_database_get_main_thread_busyness(d->database);
+
+    return enif_make_double(env, busyness);
+}
+
+static ERL_NIF_TERM
+erlfdb_database_get_client_status(ErlNifEnv *env, int argc,
+                                  const ERL_NIF_TERM argv[]) {
+#if FDB_API_VERSION >= 730
+    ErlFDBSt *st = (ErlFDBSt *)enif_priv_data(env);
+    ErlFDBDatabase *d;
+    void *res;
+    FDBFuture *future;
+
+    if (st->lib_state != ErlFDB_CONNECTED) {
+        return enif_make_badarg(env);
+    }
+
+    if (argc != 1) {
+        return enif_make_badarg(env);
+    }
+
+    if (!enif_get_resource(env, argv[0], ErlFDBDatabaseRes, &res)) {
+        return enif_make_badarg(env);
+    }
+    d = (ErlFDBDatabase *)res;
+    future = fdb_database_get_client_status(d->database);
+    return erlfdb_create_future(env, NULL, NULL, future, ErlFDB_FT_VALUE);
+#else
+    return enif_make_badarg(env);
+#endif
+}
+
+static ERL_NIF_TERM
 erlfdb_tenant_create_transaction(ErlNifEnv *env, int argc,
                                  const ERL_NIF_TERM argv[]) {
     ErlFDBSt *st = (ErlFDBSt *)enif_priv_data(env);
@@ -2430,8 +2484,7 @@ static ERL_NIF_TERM erlfdb_error_predicate(ErlNifEnv *env, int argc,
     }
 }
 
-#define NIF_FUNC(name, arity)                                                  \
-    { #name, arity, name }
+#define NIF_FUNC(name, arity) {#name, arity, name}
 static ErlNifFunc funcs[] = {
     NIF_FUNC(erlfdb_can_initialize, 0),
 
@@ -2451,6 +2504,8 @@ static ErlNifFunc funcs[] = {
     NIF_FUNC(erlfdb_database_set_option, 3),
     NIF_FUNC(erlfdb_database_open_tenant, 2),
     NIF_FUNC(erlfdb_database_create_transaction, 1),
+    NIF_FUNC(erlfdb_database_get_main_thread_busyness, 1),
+    NIF_FUNC(erlfdb_database_get_client_status, 1),
     NIF_FUNC(erlfdb_tenant_create_transaction, 1),
 
     NIF_FUNC(erlfdb_transaction_set_option, 3),
