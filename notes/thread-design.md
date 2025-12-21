@@ -1,8 +1,12 @@
 # FDB Client Threads
 
-The default configuration of erlfdb includes the creation and management of a single OS thread that is responsible for all database work created by processes in the Erlang VM. As your workload increases in size, you will need to configure the erlfdb client for horizontal scaling. Otherwise, a sufficiently sized system with a sufficiently sized workload can saturate the single client thread with work, which will lead to high latency on individual requests, and a ceiling on throughput.
+The default configuration of erlfdb includes the creation and management of a single OS thread that is responsible for all database work created by processes in the Erlang VM. As your workload increases in size, you may need to configure the erlfdb client to use more than one thread. Otherwise, a sufficiently sized system with a sufficiently sized workload can saturate the single client thread with work, which will lead to high latency on individual requests, and a ceiling on throughput.
 
 This page will guide you through the configuration necessary to scale the FDB client to several worker threads on a single BEAM VM.
+
+## Measuring how busy a client network thread is
+
+The function `erlfdb:get_main_thread_busyness/1` returns a value between 0 and 1 that indicates how busy the client network thread is. A value of 0 means that the thread is idle, while a value >= 1 means that the thread is fully utilized. This value is updated by libfdb_c every 1 second.
 
 ## Network options configuration
 
@@ -61,7 +65,8 @@ In versions 0.3 and above, the env var `network_options` defaults to
             % for the lifetime of the BEAM VM.
             %
             % When the value is 1, only the local client is used. When the
-            % value is N > 1, then N external client threads are used.
+            % value is N > 1, then N external client threads are used in addition
+            % to the main thread.
             %
             % You may also provide an `{M, F, A}` tuple. If you do, the
             % function is executed at the time the `erlfdb_nif` module is
@@ -85,7 +90,7 @@ application:get_env(erlfdb, network_options_resolved).
 
 The ideal approach is to choose an integer value that is sufficient for your workload, and no more. It's not recommended to choose a value that is larger than the number of online schedulers.
 
-Instead of choosing a specific value, you may wish for erlfdb to scale dynamically along with your scaling of the Erlang VM itself. Consider the following MFA-tuple choices.
+Instead of choosing a specific value, you may wish for erlfdb to scale dynamically along with your scaling of the Erlang VM itself. Consider the following MFA-tuple choices, but keep in mind that there may be additional overhead in the management of these threads.
 
 - `{erlang, system_info, [schedulers_online]}`
 - `{erlang, system_info, [dirty_io_schedulers]}`
@@ -116,7 +121,7 @@ When `client_threads_per_version` == 1,
 When `client_threads_per_version` > 1, the behavior described above is true; additionally:
 
 1. libfdb_c creates N copies of the dynamic library into temp files on the filesystem. Each copy will house 1 of the external threads.
-2. N threads are created by libfdb_c. These threads are *not* created with `enif_thread_create`, because the creation is contained in logic internal to libfdb_c. Each of these threads is given the name `fdb-<vsn>-<index>`. If the thread name is longer than 15 chars, it's instead given the name `fdb-<vsn>`. If this is longer than 15 chars, it's given the name `fdb-external`. On a Linux system, these threads are visible with `top -H -p $beam_pid`.
+2. N threads are created by libfdb_c. These threads are *not* created with `enif_thread_create`, because the creation is contained in logic internal to libfdb_c. Each of these threads is given the name `fdb-<vsn>-<index>`. If the thread name is longer than 15 chars, it's instead given the name `fdb-<vsn>`. If this is longer than 15 chars, it's given the name `fdb-external`. On a Linux system, these threads are visible with `ps -L -p $beam_pid` and `top -H -p $beam_pid`.
 3. Each database object (via `erlfdb:create_database/1`) is linked to a client thread at the time of creation. The threads are distributed in a round-robin fashion. Therefore, to make use of N client threads, you must have N database objects.
 4. Shutdown: Each external thread is waited upon immediately after the local client network event loop returns. Thus, you may consider the external client threads as "children" of the local client network thread created by `enif_thread_create`. This relationship is necessary and sufficient for the Erlang VM and its operator to maintain control over the OS threads on the system.
 
@@ -139,6 +144,10 @@ To enable client tracing (C API Option `FDB_NET_OPTION_TRACE_ENABLE`), set the f
     ]}
 ].
 ```
+
+> #### Tip {: .tip}
+>
+> The directory must exist and be writable by the user running the Erlang VM.
 
 ## Past Versions 0.0 - 0.2
 
