@@ -417,6 +417,99 @@ watch_to_test() ->
         error(timeout)
     end.
 
+range_iterator_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    KVs = create_range(Tenant, <<"range_iterator_test">>, 3),
+    {StartKey, EndKey} = erlfdb_tuple:range({<<"range_iterator_test">>}),
+
+    % Single-page GetRange
+    ?assertMatch(
+        KVs,
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            {ok, State} = erlfdb_range_iterator:start(Tx, StartKey, EndKey, []),
+            {ok, Rows, State1} = erlfdb_range_iterator:next(State),
+            {done, State2} = erlfdb_range_iterator:next(State1),
+            erlfdb_range_iterator:stop(State2),
+            [{erlfdb_tuple:unpack(K), erlfdb_tuple:unpack(V)} || {K, V} <- Rows]
+        end)
+    ),
+
+    % Reverse GetRange - returned page is reversed, this is consistent with the FDB API
+    ?assertEqual(
+        lists:reverse(lists:sublist(KVs, 2, 2)),
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            {ok, State} = erlfdb_range_iterator:start(Tx, StartKey, EndKey, [
+                {limit, 2}, {reverse, true}
+            ]),
+            {ok, Rows, State1} = erlfdb_range_iterator:next(State),
+            {done, State2} = erlfdb_range_iterator:next(State1),
+            erlfdb_range_iterator:stop(State2),
+            [{erlfdb_tuple:unpack(K), erlfdb_tuple:unpack(V)} || {K, V} <- Rows]
+        end)
+    ),
+
+    % Multi-page GetRange
+    ?assertMatch(
+        KVs,
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            {ok, State} = erlfdb_range_iterator:start(Tx, StartKey, EndKey, [{target_bytes, 1}]),
+            {ok, [Row1], State1} = erlfdb_range_iterator:next(State),
+            {ok, [Row2], State2} = erlfdb_range_iterator:next(State1),
+            {ok, [Row3], State3} = erlfdb_range_iterator:next(State2),
+            {ok, [], State4} = erlfdb_range_iterator:next(State3),
+            {done, State5} = erlfdb_range_iterator:next(State4),
+            erlfdb_range_iterator:stop(State5),
+            [{erlfdb_tuple:unpack(K), erlfdb_tuple:unpack(V)} || {K, V} <- [Row1, Row2, Row3]]
+        end)
+    ),
+
+    % Early Cancel
+    ?assertMatch(
+        ok,
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            {ok, State} = erlfdb_range_iterator:start(Tx, StartKey, EndKey, [{target_bytes, 1}]),
+            {ok, [_Row1], State1} = erlfdb_range_iterator:next(State),
+            Future = erlfdb_range_iterator:get_future(State1),
+            true = is_tuple(Future),
+            ok = erlfdb_range_iterator:stop(State1)
+        end)
+    ),
+
+    % GetMappedRange
+    Vsn = erlfdb_nif:get_max_api_version(),
+
+    if
+        Vsn >= 730 ->
+            Mapper = create_mapping_on_range(
+                Tenant, <<"range_iterator_test">>, 3, <<"hello world">>
+            ),
+            MStartKey = erlfdb_tuple:pack({<<"range_iterator_test">>, 1}),
+            MEndKey = erlfdb_key:strinc(erlfdb_tuple:pack({<<"range_iterator_test">>, 3})),
+
+            ?assertMatch(
+                [<<"hello world">>, <<"hello world">>, <<"hello world">>],
+                erlfdb:transactional(Tenant, fun(Tx) ->
+                    {ok, State} = erlfdb_range_iterator:start(Tx, MStartKey, MEndKey, [
+                        {mapper, erlfdb_tuple:pack(Mapper)}, {target_bytes, 10}
+                    ]),
+                    {ok, [{{_PKey, _PValue}, {_SKeyBegin, _SKeyEnd}, [{_Key, Message1}]}], State1} = erlfdb_range_iterator:next(
+                        State
+                    ),
+                    {ok, [{{_PKey1, _PValue1}, {_SKeyBegin1, _SKeyEnd1}, [{_Key1, Message2}]}],
+                        State2} = erlfdb_range_iterator:next(State1),
+                    {ok, [{{_PKey2, _PValue2}, {_SKeyBegin2, _SKeyEnd2}, [{_Key2, Message3}]}],
+                        State3} = erlfdb_range_iterator:next(State2),
+                    {ok, [], State4} = erlfdb_range_iterator:next(State3),
+                    {done, State5} = erlfdb_range_iterator:next(State4),
+                    erlfdb_range_iterator:stop(State5),
+                    [Message1, Message2, Message3]
+                end)
+            );
+        true ->
+            ok
+    end.
+
 get_set_get(DbOrTenant) ->
     Key = gen_key(8),
     Val = crypto:strong_rand_bytes(8),
