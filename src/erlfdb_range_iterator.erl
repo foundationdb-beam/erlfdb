@@ -1,4 +1,5 @@
 -module(erlfdb_range_iterator).
+-behaviour(erlfdb_iterator).
 
 -define(DOCATTRS, ?OTP_RELEASE >= 27).
 
@@ -17,13 +18,14 @@ To use the iterator,
 
 1. `erlfdb_range_iterator:start/4`: Sends the first GetRange request to the
    database server.
-2. `erlfdb_range_iterator.next/1`: Waits for the result of the GetRange request.
+2. `erlfdb_iterator.next/1`: Waits for the result of the GetRange request.
    Then issues another GetRange request to the database server.
-3. `erlfdb_range_iterator.stop/1`: Cancels the active future, if one exists.
+3. `erlfdb_iterator.stop/1`: Cancels the active future, if one exists.
 """.
 -endif.
 
--export([start/4, next/1, stop/1, get_future/1]).
+-export([start/3, start/4, get_future/1]).
+-export([handle_next/1, handle_stop/1]).
 
 -record(state, {
     tx,
@@ -39,8 +41,22 @@ To use the iterator,
     future
 }).
 
--type state() :: term().
--export_type([state/0]).
+-type state() :: #state{}.
+-type page() :: list(erlfdb:kv()) | list(erlfdb:mapped_kv()).
+
+-export_type([page/0]).
+
+-if(?DOCATTRS).
+-doc """
+Starts the iterator.
+
+Equivalent to `start(Tx, StartKey, EndKey, [])`.
+""".
+-endif.
+-spec start(erlfdb:transaction(), erlfdb:key(), erlfdb:key()) ->
+    erlfdb_iterator:iterator().
+start(Tx, StartKey, EndKey) ->
+    start(Tx, StartKey, EndKey, []).
 
 -if(?DOCATTRS).
 -doc """
@@ -50,39 +66,25 @@ Sends the first GetRange request to the database server.
 """.
 -endif.
 -spec start(erlfdb:transaction(), erlfdb:key(), erlfdb:key(), [erlfdb:fold_option()]) ->
-    {ok, state()}.
+    erlfdb_iterator:iterator().
 start(Tx, StartKey, EndKey, Options) ->
     State = new_state(Tx, StartKey, EndKey, Options),
     State1 = send_get_range(State),
-    {ok, State1}.
+    erlfdb_iterator:new(?MODULE, State1).
 
--if(?DOCATTRS).
--doc """
-Progresses the iterator, returning data that is retrieved.
-
-Waits for the active future, sends the next GetRange request, and returns the data.
-""".
--endif.
--spec next(state()) ->
-    {done, state()} | {ok, list(erlfdb:kv()) | list(erlfdb:mapped_kv()), state()}.
-next(State = #state{future = undefined}) ->
-    {done, State};
-next(State = #state{}) ->
+-spec handle_next(state()) ->
+    {halt, state()} | {cont, [page()], state()}.
+handle_next(State = #state{future = undefined}) ->
+    {halt, State};
+handle_next(State = #state{}) ->
     #state{future = Future} = State,
     Result = erlfdb:wait(Future, []),
     handle_result(Result, State).
 
--if(?DOCATTRS).
--doc """
-Stops the iterator.
-
-If there is an active future, it is cancelled.
-""".
--endif.
--spec stop(state()) -> ok.
-stop(_State = #state{future = undefined}) ->
+-spec handle_stop(state()) -> ok.
+handle_stop(_State = #state{future = undefined}) ->
     ok;
-stop(_State = #state{future = Future}) ->
+handle_stop(_State = #state{future = Future}) ->
     erlfdb:cancel(Future),
     ok.
 
@@ -118,7 +120,17 @@ handle_result({RawRows, Count, HasMore}, State = #state{}) ->
             true ->
                 State1
         end,
-    {ok, Rows, State2}.
+
+    case {Rows, Recurse} of
+        {[], false} ->
+            {halt, State2};
+        {[], true} ->
+            {cont, [], State2};
+        {_, false} ->
+            {halt, [Rows], State2};
+        {_, true} ->
+            {cont, [Rows], State2}
+    end.
 
 new_state(Tx, StartKey, EndKey, Options) ->
     Reverse =
