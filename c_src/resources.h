@@ -40,20 +40,37 @@ typedef struct _ErlFDBFuture {
     ErlFDBFutureType ftype;
     ErlNifPid pid;
 
-    /* pid_env: A 'process bound environment' for sending messages
-     * in the event of the callback executing synchronously
-     * (e.g. fdb_future_cancel)
+    /* pid_env: The process-bound environment from the NIF call that
+     * created this future. Used as the 'caller_env' argument to
+     * enif_send() when the FDB callback fires synchronously.
      *
-     * Being process bound, it must not be used across different
-     * NIF calls.
+     * LIFETIME: Only valid during the erlfdb_create_future() call.
+     * After that NIF returns, this pointer is stale and must not be
+     * dereferenced.
      *
-     * An alternative is to use thread-specific data (tsd) to
-     * store the environment for each NIF call.
+     * SAFETY: This is safe because we only use pid_env when
+     * enif_thread_type() != ERL_NIF_THR_UNDEFINED, which indicates
+     * we're on an Erlang scheduler thread. Synchronous callbacks
+     * only occur during fdb_future_set_callback() within
+     * erlfdb_create_future(), so pid_env is still valid at that point.
+     * Asynchronous callbacks from the FDB network thread pass NULL
+     * to enif_send() instead.
+     *
+     * FUTURE CONSIDERATION: A more robust alternative would be to use
+     * enif_tsd_key_create() to store the current NIF environment in
+     * thread-specific data at the start of each NIF call. The callback
+     * could then retrieve it via enif_tsd_get(), eliminating the need
+     * to store a potentially-stale pointer in the future struct.
+     *
+     * See erlfdb_future_cb() in main.c for the callback implementation.
      */
     ErlNifEnv *pid_env;
 
-    /* msg_env: A 'process independent environment' used to send
-     * terms with enif_send.
+    /* msg_env: A process-independent environment allocated with
+     * enif_alloc_env(). Owns the terms (msg_ref) sent via enif_send().
+     *
+     * LIFETIME: Allocated in erlfdb_create_future(), freed in
+     * erlfdb_future_dtor(). Survives across NIF calls and threads.
      */
     ErlNifEnv *msg_env;
 

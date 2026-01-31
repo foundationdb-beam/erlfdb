@@ -63,10 +63,22 @@ static void erlfdb_future_cb(FDBFuture *fdb_future, void *data) {
     ErlNifEnv *caller;
     ERL_NIF_TERM msg;
 
-    // FoundationDB callbacks can fire from the thread
-    // that created them. Check if we were actually
-    // submitted to the network thread or not so that
-    // we pass the correct environment to enif_send
+    // FoundationDB callbacks can fire either:
+    // 1. Synchronously from the calling thread (when the future is already
+    //    ready at the time fdb_future_set_callback is called), or
+    // 2. Asynchronously from the FDB network thread
+    //
+    // We use enif_thread_type() to distinguish these cases:
+    // - ERL_NIF_THR_UNDEFINED means we're on the FDB network thread (case 2)
+    // - Any other value means we're on an Erlang scheduler thread (case 1)
+    //
+    // For enif_send, when called from a non-scheduler thread we must pass
+    // NULL as the caller environment. When called synchronously from a NIF,
+    // we can pass the process-bound environment (pid_env) for efficiency.
+    //
+    // IMPORTANT: pid_env is only valid during the NIF call that created
+    // this future. This is safe here because synchronous callbacks only
+    // occur during erlfdb_create_future, before that NIF returns.
     if (enif_thread_type() == ERL_NIF_THR_UNDEFINED) {
         caller = NULL;
     } else {
@@ -100,6 +112,11 @@ static ERL_NIF_TERM erlfdb_create_future(ErlNifEnv *env, ERL_NIF_TERM *tx_ref,
     fdb_error_t err;
 
     f = enif_alloc_resource(ErlFDBFutureRes, sizeof(ErlFDBFuture));
+    if (f == NULL) {
+        fdb_future_destroy(future);
+        return enif_make_badarg(env);
+    }
+
     f->future = future;
     f->ftype = ftype;
     if (to == NULL) {
@@ -109,6 +126,11 @@ static ERL_NIF_TERM erlfdb_create_future(ErlNifEnv *env, ERL_NIF_TERM *tx_ref,
     }
     f->pid_env = env;
     f->msg_env = enif_alloc_env();
+    if (f->msg_env == NULL) {
+        enif_release_resource(f);
+        return enif_make_badarg(env);
+    }
+
     if (tx_ref != NULL) {
         f->msg_ref = T2(f->msg_env, enif_make_copy(f->msg_env, *tx_ref),
                         enif_make_copy(f->msg_env, ref));
@@ -116,6 +138,11 @@ static ERL_NIF_TERM erlfdb_create_future(ErlNifEnv *env, ERL_NIF_TERM *tx_ref,
         f->msg_ref = enif_make_copy(f->msg_env, ref);
     }
     f->lock = enif_mutex_create("fdb:future_lock");
+    if (f->lock == NULL) {
+        enif_release_resource(f);
+        return enif_make_badarg(env);
+    }
+
     f->cancelled = false;
 
     // This resource reference counting dance is a bit
@@ -591,9 +618,8 @@ static ERL_NIF_TERM erlfdb_network_set_option(ErlNifEnv *env, int argc,
         option = FDB_NET_OPTION_DISABLE_CLIENT_STATISTICS_LOGGING;
     } else if (IS_ATOM(argv[0], enable_slow_task_profiling)) {
         option = FDB_NET_OPTION_ENABLE_SLOW_TASK_PROFILING;
-    }
 #if FDB_API_VERSION >= 630
-    else if (IS_ATOM(argv[0], enable_run_loop_profiling)) {
+    } else if (IS_ATOM(argv[0], enable_run_loop_profiling)) {
         option = FDB_NET_OPTION_ENABLE_RUN_LOOP_PROFILING;
     } else if (IS_ATOM(argv[0], client_threads_per_version)) {
         option = FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION;
@@ -602,9 +628,9 @@ static ERL_NIF_TERM erlfdb_network_set_option(ErlNifEnv *env, int argc,
 #if FDB_API_VERSION >= 730
         option = FDB_NET_OPTION_IGNORE_EXTERNAL_CLIENT_FAILURES;
 #else
-    // 7.3 added some new checks for loading external client libraries
-    // and those checks are not present in the older versions
-    return ATOM_ok;
+        // 7.3 added some new checks for loading external client libraries
+        // and those checks are not present in the older versions
+        return ATOM_ok;
 #endif
     } else {
         return enif_make_badarg(env);
@@ -843,6 +869,11 @@ static ERL_NIF_TERM erlfdb_create_database(ErlNifEnv *env, int argc,
     }
 
     d = enif_alloc_resource(ErlFDBDatabaseRes, sizeof(ErlFDBDatabase));
+    if (d == NULL) {
+        fdb_database_destroy(database);
+        return enif_make_badarg(env);
+    }
+
     d->database = database;
 
     ret = enif_make_resource(env, d);
@@ -890,6 +921,11 @@ static ERL_NIF_TERM erlfdb_database_open_tenant(ErlNifEnv *env, int argc,
     }
 
     ten = enif_alloc_resource(ErlFDBTenantRes, sizeof(ErlFDBTenant));
+    if (ten == NULL) {
+        fdb_tenant_destroy(tenant);
+        return enif_make_badarg(env);
+    }
+
     ten->tenant = tenant;
 
     ret = enif_make_resource(env, ten);
@@ -995,6 +1031,11 @@ erlfdb_database_create_transaction(ErlNifEnv *env, int argc,
     }
 
     t = enif_alloc_resource(ErlFDBTransactionRes, sizeof(ErlFDBTransaction));
+    if (t == NULL) {
+        fdb_transaction_destroy(transaction);
+        return enif_make_badarg(env);
+    }
+
     t->transaction = transaction;
 
     enif_self(env, &pid);
@@ -1095,6 +1136,11 @@ erlfdb_tenant_create_transaction(ErlNifEnv *env, int argc,
     }
 
     t = enif_alloc_resource(ErlFDBTransactionRes, sizeof(ErlFDBTransaction));
+    if (t == NULL) {
+        fdb_transaction_destroy(transaction);
+        return enif_make_badarg(env);
+    }
+
     t->transaction = transaction;
 
     enif_self(env, &pid);
