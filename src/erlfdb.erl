@@ -1930,10 +1930,12 @@ get_approximate_size(?IS_SS = SS) ->
 Gets a local auto-incrementing integer for this transaction.
 
 Each time this function is executed, a local counter on the transaction is incremented,
-and the value returned.
+and the value returned. Returns values in the range 0-65535 (16-bit). Raises `badarg`
+if called more than 65536 times on the same transaction.
 
 This integer is useful in combination with versionstamps to ensure uniqueness
-of versionstamped keys and values for your transaction.
+of versionstamped keys and values for your transaction. The 16-bit limit matches
+the user-batch portion of FoundationDB versionstamps.
 
 ## Examples
 
@@ -1955,7 +1957,7 @@ Without `get_next_tx_id`, the versionstamped keys generated at commit time would
 exactly one versionstamp is created at commit time.
 """.
 -endif.
--spec get_next_tx_id(transaction() | snapshot()) -> non_neg_integer().
+-spec get_next_tx_id(transaction() | snapshot()) -> 0..65535.
 get_next_tx_id(?IS_TX = Tx) ->
     erlfdb_nif:transaction_get_next_tx_id(Tx);
 get_next_tx_id(?IS_SS = SS) ->
