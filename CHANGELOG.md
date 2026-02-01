@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.4 (TBD)
+
+### Enhancements
+
+  * (#65) Add an iterator interface for Range requests.
+
 ## v0.3.3 (2025-12-21)
 
 ### Enhancements

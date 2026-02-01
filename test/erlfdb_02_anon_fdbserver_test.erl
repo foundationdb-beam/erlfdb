@@ -417,6 +417,128 @@ watch_to_test() ->
         error(timeout)
     end.
 
+range_iterator_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    KVs = create_range(Tenant, <<"range_iterator_test">>, 3),
+    {StartKey, EndKey} = erlfdb_tuple:range({<<"range_iterator_test">>}),
+
+    UnpackRows = fun(R) ->
+        [{erlfdb_tuple:unpack(K), erlfdb_tuple:unpack(V)} || {K, V} <- R]
+    end,
+
+    % Single-page GetRange
+    ?assertMatch(
+        KVs,
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            Iterator = erlfdb_range_iterator:start(Tx, StartKey, EndKey, []),
+            {halt, [Rows], Iterator1} = erlfdb_iterator:next(Iterator),
+            erlfdb_iterator:stop(Iterator1),
+            UnpackRows(Rows)
+        end)
+    ),
+
+    % Reverse GetRange - returned page is reversed, this is consistent with the FDB API
+    ?assertEqual(
+        lists:reverse(lists:sublist(KVs, 2, 2)),
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            Iterator = erlfdb_range_iterator:start(Tx, StartKey, EndKey, [
+                {limit, 2}, {reverse, true}
+            ]),
+            {halt, [Rows], Iterator1} = erlfdb_iterator:next(Iterator),
+            erlfdb_iterator:stop(Iterator1),
+            UnpackRows(Rows)
+        end)
+    ),
+
+    % Multi-page GetRange
+    ?assertMatch(
+        KVs,
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            Iterator = erlfdb_range_iterator:start(Tx, StartKey, EndKey, [{target_bytes, 1}]),
+            {cont, [[Row1]], Iterator1} = erlfdb_iterator:next(Iterator),
+            {cont, [[Row2]], Iterator2} = erlfdb_iterator:next(Iterator1),
+            {cont, [[Row3]], Iterator3} = erlfdb_iterator:next(Iterator2),
+            {halt, Iterator4} = erlfdb_iterator:next(Iterator3),
+            erlfdb_iterator:stop(Iterator4),
+            UnpackRows([Row1, Row2, Row3])
+        end)
+    ),
+
+    % Run
+    ?assertMatch(
+        KVs,
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            Iterator = erlfdb_range_iterator:start(Tx, StartKey, EndKey),
+            {[Rows], Iterator1} = erlfdb_iterator:run(Iterator),
+            ok = erlfdb_iterator:stop(Iterator1),
+            UnpackRows(Rows)
+        end)
+    ),
+
+    % Pipeline
+    ?assertMatch(
+        KVs,
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            IteratorA = erlfdb_range_iterator:start(Tx, StartKey, EndKey, [{target_bytes, 1}]),
+            IteratorB = erlfdb_range_iterator:start(Tx, StartKey, EndKey),
+            [{[[RowA1], [RowA2], [RowA3]], IteratorA1}, {[RowsB], IteratorB1}] = erlfdb_iterator:pipeline(
+                [IteratorA, IteratorB]
+            ),
+            ok = erlfdb_iterator:stop(IteratorA1),
+            ok = erlfdb_iterator:stop(IteratorB1),
+            RowsB = RowsA = [RowA1, RowA2, RowA3],
+            UnpackRows(RowsA)
+        end)
+    ),
+
+    % Early Cancel
+    ?assertMatch(
+        ok,
+        erlfdb:transactional(Tenant, fun(Tx) ->
+            Iterator = erlfdb_range_iterator:start(Tx, StartKey, EndKey, [{target_bytes, 1}]),
+            {cont, [[_Row1]], Iterator1} = erlfdb_iterator:next(Iterator),
+            {_, State} = erlfdb_iterator:module_state(Iterator1),
+            Future = erlfdb_range_iterator:get_future(State),
+            true = is_tuple(Future),
+            ok = erlfdb_iterator:stop(Iterator1)
+        end)
+    ),
+
+    % GetMappedRange
+    Vsn = erlfdb_nif:get_max_api_version(),
+
+    if
+        Vsn >= 730 ->
+            Mapper = create_mapping_on_range(
+                Tenant, <<"range_iterator_test">>, 3, <<"hello world">>
+            ),
+            MStartKey = erlfdb_tuple:pack({<<"range_iterator_test">>, 1}),
+            MEndKey = erlfdb_key:strinc(erlfdb_tuple:pack({<<"range_iterator_test">>, 3})),
+
+            ?assertMatch(
+                [<<"hello world">>, <<"hello world">>, <<"hello world">>],
+                erlfdb:transactional(Tenant, fun(Tx) ->
+                    Iterator = erlfdb_range_iterator:start(Tx, MStartKey, MEndKey, [
+                        {mapper, erlfdb_tuple:pack(Mapper)}, {target_bytes, 10}
+                    ]),
+                    {cont, [[{{_PKey, _PValue}, {_SKeyBegin, _SKeyEnd}, [{_Key, Message1}]}]],
+                        Iterator1} = erlfdb_iterator:next(
+                        Iterator
+                    ),
+                    {cont, [[{{_PKey1, _PValue1}, {_SKeyBegin1, _SKeyEnd1}, [{_Key1, Message2}]}]],
+                        Iterator2} = erlfdb_iterator:next(Iterator1),
+                    {cont, [[{{_PKey2, _PValue2}, {_SKeyBegin2, _SKeyEnd2}, [{_Key2, Message3}]}]],
+                        Iterator3} = erlfdb_iterator:next(Iterator2),
+                    {halt, Iterator4} = erlfdb_iterator:next(Iterator3),
+                    erlfdb_iterator:stop(Iterator4),
+                    [Message1, Message2, Message3]
+                end)
+            );
+        true ->
+            ok
+    end.
+
 get_set_get(DbOrTenant) ->
     Key = gen_key(8),
     Val = crypto:strong_rand_bytes(8),
