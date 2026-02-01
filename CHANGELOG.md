@@ -1,10 +1,11 @@
 # Changelog
 
-## v0.3.4 (TBD)
+## v0.3.4 (2025-02-01)
 
 ### Enhancements
 
   * (#65) Add an iterator interface for Range requests.
+  * (#66) Handle allocation failures in NIF
 
 ## v0.3.3 (2025-12-21)
 
