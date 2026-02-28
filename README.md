@@ -36,7 +36,7 @@ Add erlfdb as a dependency in your Erlang project's rebar.config:
 ```erlang
 % rebar.config
 {deps, [
-    {erlfdb, "0.3.1"}
+    {erlfdb, "1.0.0"}
 ]}.
 ```
 
@@ -48,7 +48,7 @@ Add erlfdb as a dependency in your Elixir project's mix.exs:
 # mix.exs
 defp deps do
   [
-    {:erlfdb, "~> 0.3"}
+    {:erlfdb, "~> 1.0"}
   ]
 end
 ```

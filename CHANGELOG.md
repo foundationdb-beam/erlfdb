@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.0 (2026-02-28)
+
+No changes.
+
 ## v0.3.4 (2025-02-01)
 
 ### Enhancements
