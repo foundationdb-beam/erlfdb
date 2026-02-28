@@ -4,7 +4,7 @@
 
 ```elixir
 Mix.install([
-  {:erlfdb, "~> 0.3"}
+  {:erlfdb, "~> 1.0"}
 ])
 ```
 

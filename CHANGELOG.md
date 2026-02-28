@@ -4,7 +4,7 @@
 
 No changes.
 
-## v0.3.4 (2025-02-01)
+## v0.3.4 (2026-02-01)
 
 ### Enhancements
 
@@ -75,7 +75,7 @@ Thank you to the following new contributors! :)
  * [Livebook | KvQueue](kv_queue.html): An interactive notebook that
  demonstrates the creation of a durable queue in FoundationDB.
 
-## v0.2.2 (2024-01-16)
+## v0.2.2 (2025-01-16)
 
 ### Bug fixes
 
