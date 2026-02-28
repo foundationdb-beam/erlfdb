@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:erlfdb, "~> 0.3"}
+  {:erlfdb, "~> 1.0"}
 ])
 ```
 
@@ -66,7 +66,7 @@ If this is all working, it looks like we are ready to start building a real appl
 <!-- livebook:{"force_markdown":true} -->
 
 ```elixir
-# In mix.exs deps, add: `{:erlfdb, "~> 0.3"}`
+# In mix.exs deps, add: `{:erlfdb, "~> 1.0"}`
 db = :erlfdb.open()
 :erlfdb.set(db, "hello", "world")
 IO.puts("hello " <> :erlfdb.get(db, "hello"))
