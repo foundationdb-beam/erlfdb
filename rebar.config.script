@@ -223,7 +223,6 @@ case CompileAPIVersion of
                 Log(error, "FDB API version could not be determined. Continuing anyway...", [])
         end;
     _ ->
-        Log(info, "Compiling with FDB_API_VERSION=~p", [CompileAPIVersion]),
         ok
 end.
 

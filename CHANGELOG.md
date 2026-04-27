@@ -4,7 +4,12 @@
 
 ### Enhancements
 
- * Added `erlfdb_directory_cache`: a simple ETS-driven cache for storing open directories.
+ * (#75) Added `erlfdb_directory_cache`: a simple ETS-driven cache for storing open directories.
+ * (#76) Added `mix.exs` for proper compilation using Mix in Elixir projects
+ 
+### Bug fixes
+
+ * (#76) Removed extraneous log message "===> [erlfdb] Compiling with FDB_API_VERSION=730" from rebar output
 
 ## v1.1.0 (2026-03-07)
 
