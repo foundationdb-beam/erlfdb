@@ -539,6 +539,130 @@ range_iterator_test() ->
             ok
     end.
 
+%% erlfdb_directory_cache tests
+
+directory_cache_create_or_open_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    Root = erlfdb_directory:root(),
+    Table = erlfdb_directory_cache:new(dir_cache_create_or_open),
+    Path = [<<"dir_cache_create_or_open">>],
+
+    Node = erlfdb_directory_cache:create_or_open(Table, Tenant, Root, Path),
+    ?assertEqual([{utf8, <<"dir_cache_create_or_open">>}], erlfdb_directory:get_path(Node)).
+
+directory_cache_open_returns_cached_node_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    Root = erlfdb_directory:root(),
+    Table = erlfdb_directory_cache:new(dir_cache_open_cached),
+    Path = [<<"dir_cache_open_cached">>],
+
+    % Seed the directory in FDB, then open twice via cache.
+    erlfdb_directory:create_or_open(Tenant, Root, Path),
+    Node1 = erlfdb_directory_cache:open(Table, Tenant, Root, Path),
+    Node2 = erlfdb_directory_cache:open(Table, Tenant, Root, Path),
+
+    % Both calls must return the same term — the second is a cache hit.
+    ?assertEqual(Node1, Node2).
+
+directory_cache_invalidate_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    Root = erlfdb_directory:root(),
+    Table = erlfdb_directory_cache:new(dir_cache_invalidate),
+    Path = [<<"dir_cache_invalidate">>],
+
+    Node1 = erlfdb_directory_cache:create_or_open(Table, Tenant, Root, Path),
+
+    % Evict and re-resolve from FDB — should get an equivalent node.
+    erlfdb_directory_cache:invalidate(Table, Root, Path),
+    Node2 = erlfdb_directory_cache:create_or_open(Table, Tenant, Root, Path),
+
+    ?assertEqual(erlfdb_directory:get_name(Node1), erlfdb_directory:get_name(Node2)),
+    ?assertEqual(erlfdb_directory:get_path(Node1), erlfdb_directory:get_path(Node2)).
+
+directory_cache_open_missing_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    Root = erlfdb_directory:root(),
+    Table = erlfdb_directory_cache:new(dir_cache_open_missing),
+    Path = [<<"dir_cache_open_missing_nonexistent">>],
+
+    ?assertError(
+        {erlfdb_directory, {open_error, path_missing, _}},
+        erlfdb_directory_cache:open(Table, Tenant, Root, Path)
+    ).
+
+directory_cache_purge_all_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    Root = erlfdb_directory:root(),
+    Table = erlfdb_directory_cache:new(dir_cache_purge_all),
+
+    erlfdb_directory_cache:create_or_open(Table, Tenant, Root, [<<"purge_all_a">>]),
+    erlfdb_directory_cache:create_or_open(Table, Tenant, Root, [<<"purge_all_b">>]),
+    ?assertEqual(2, ets:info(Table, size)),
+
+    erlfdb_directory_cache:purge(Table),
+    ?assertEqual(0, ets:info(Table, size)).
+
+directory_cache_purge_ttl_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    Root = erlfdb_directory:root(),
+    Table = erlfdb_directory_cache:new(dir_cache_purge_ttl),
+
+    erlfdb_directory_cache:create_or_open(Table, Tenant, Root, [<<"purge_ttl_old">>]),
+    timer:sleep(50),
+    erlfdb_directory_cache:create_or_open(Table, Tenant, Root, [<<"purge_ttl_new">>]),
+    ?assertEqual(2, ets:info(Table, size)),
+
+    % Purge entries older than 25ms — the first entry is ~50ms old, the second is fresh.
+    erlfdb_directory_cache:purge(Table, 25),
+    ?assertEqual(1, ets:info(Table, size)),
+
+    % The surviving entry must be the recently-cached one.
+    Surviving = erlfdb_directory_cache:open(Table, Tenant, Root, [<<"purge_ttl_new">>]),
+    ?assertEqual([{utf8, <<"purge_ttl_new">>}], erlfdb_directory:get_path(Surviving)).
+
+directory_cache_purge_keeps_fresh_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    Root = erlfdb_directory:root(),
+    Table = erlfdb_directory_cache:new(dir_cache_purge_fresh),
+
+    erlfdb_directory_cache:create_or_open(Table, Tenant, Root, [<<"purge_fresh">>]),
+
+    % Purge with a generous TTL — nothing should be evicted.
+    erlfdb_directory_cache:purge(Table, 60000),
+    ?assertEqual(1, ets:info(Table, size)).
+
+directory_cache_store_equivalent_to_open_test() ->
+    Db = erlfdb_sandbox:open(),
+    Tenant = erlfdb_util:create_and_open_test_tenant(Db, [empty]),
+    Root = erlfdb_directory:root(),
+    Path = [<<"dir_cache_store">>],
+
+    % Resolve the node directly from FDB (simulating post-transaction store).
+    Node = erlfdb_directory:create_or_open(Tenant, Root, Path),
+
+    % Populate the cache manually via store, then retrieve via open.
+    % If store computes the same key as open_with_cache, open will hit the
+    % cache and return the identical term rather than going back to FDB.
+    TableA = erlfdb_directory_cache:new(dir_cache_store_a),
+    erlfdb_directory_cache:store(TableA, Root, Node),
+    FromCache = erlfdb_directory_cache:open(TableA, Tenant, Root, Path),
+    ?assertEqual(Node, FromCache),
+
+    % Cross-check: a cache populated by open_with_cache must also be
+    % retrievable by a subsequent store-then-open round-trip.
+    TableB = erlfdb_directory_cache:new(dir_cache_store_b),
+    _WarmUp = erlfdb_directory_cache:open(TableB, Tenant, Root, Path),
+    erlfdb_directory_cache:store(TableB, Root, Node),
+    FromCacheB = erlfdb_directory_cache:open(TableB, Tenant, Root, Path),
+    ?assertEqual(Node, FromCacheB).
+
 get_set_get(DbOrTenant) ->
     Key = gen_key(8),
     Val = crypto:strong_rand_bytes(8),

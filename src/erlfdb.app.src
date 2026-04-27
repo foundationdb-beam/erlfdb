@@ -12,7 +12,7 @@
 
 {application, erlfdb, [
     {description, "Erlang client for FoundationDB"},
-    {vsn, "1.1.0"},
+    {vsn, "1.2.0"},
     {registered, []},
     {applications, [kernel, stdlib]},
     {maintainers, ["Jesse Stimpson"]},

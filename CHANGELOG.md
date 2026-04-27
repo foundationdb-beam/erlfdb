@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.0 (TBD)
+
+### Enhancements
+
+ * Added `erlfdb_directory_cache`: a simple ETS-driven cache for storing open directories.
+
 ## v1.1.0 (2026-03-07)
 
 ### Enhancements
