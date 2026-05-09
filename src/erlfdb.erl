@@ -238,6 +238,7 @@ iex> :erlfdb.transactional(db, fn tx ->
     version/0,
     wait_option/0,
     watch_future_ready_message/0,
+    tx_object/0,
     watch_option/0
 ]).
 
@@ -303,6 +304,7 @@ iex> :erlfdb.transactional(db, fn tx ->
 -type tenant() :: erlfdb_nif:tenant().
 -type tenant_name() :: binary().
 -type transaction() :: erlfdb_nif:transaction().
+-type tx_object() :: database() | transaction() | snapshot().
 -type transaction_future_ready_message() :: {{reference(), reference()}, ready}.
 -type transaction_option() :: erlfdb_nif:transaction_option().
 -type value() :: erlfdb_nif:value().
@@ -572,7 +574,7 @@ Performing non-trivial logic inside a transaction:
 ```
 """.
 -endif.
--spec transactional(database() | tenant() | transaction() | snapshot(), function()) -> any().
+-spec transactional(tx_object() | tenant(), function()) -> any().
 transactional(?IS_DB = Db, UserFun) when is_function(UserFun, 1) ->
     clear_erlfdb_error(),
     Tx = create_transaction(Db),
@@ -1032,7 +1034,7 @@ Using a `t:transaction/0` as input, you must wait on the `t:future/0`:
 ```
 """.
 -endif.
--spec get(database() | transaction() | snapshot(), key()) -> future() | result().
+-spec get(tx_object(), key()) -> future() | result().
 get(?IS_DB = Db, Key) ->
     transactional(Db, fun(Tx) ->
         wait(get(Tx, Key))
@@ -1062,7 +1064,7 @@ Resolves a `t:key_selector/0` against the keys in the database.
 *C API function*: [`fdb_transaction_get_key`](https://apple.github.io/foundationdb/api-c.html#c.fdb_transaction_get_key)
 """.
 -endif.
--spec get_key(database() | transaction() | snapshot(), key_selector()) -> future() | key().
+-spec get_key(tx_object(), key_selector()) -> future() | key().
 get_key(?IS_DB = Db, Key) ->
     transactional(Db, fun(Tx) ->
         wait(get_key(Tx, Key))
@@ -1103,7 +1105,7 @@ returned. (right side exclusive)
 ```
 """.
 -endif.
--spec get_range(database() | transaction(), key(), key()) -> list(kv()).
+-spec get_range(tx_object(), key(), key()) -> list(kv()).
 get_range(DbOrTx, StartKey, EndKey) ->
     get_range(DbOrTx, StartKey, EndKey, []).
 
@@ -1139,7 +1141,7 @@ returned. (left-inclusive, right-exclusive)
 ```
 """.
 -endif.
--spec get_range(database() | transaction(), key(), key(), [fold_option()]) ->
+-spec get_range(tx_object(), key(), key(), [fold_option()]) ->
     fold_future() | list(mapped_kv()) | list(kv()).
 get_range(?IS_DB = Db, StartKey, EndKey, Options) ->
     transactional(Db, fun(Tx) ->
@@ -1178,7 +1180,7 @@ with `get_raange_startswith/3`.
 *C API function*: [`fdb_transaction_get_range`](https://apple.github.io/foundationdb/api-c.html#c.fdb_transaction_get_range)
 """.
 -endif.
--spec get_range_startswith(database() | transaction(), key()) -> list(kv()).
+-spec get_range_startswith(tx_object(), key()) -> list(kv()).
 get_range_startswith(DbOrTx, Prefix) ->
     get_range_startswith(DbOrTx, Prefix, []).
 
@@ -1187,7 +1189,7 @@ get_range_startswith(DbOrTx, Prefix) ->
 Equivalent to `get_range(Tx, Prefix, erlfdb_key:strinc(Prefix), Options).`
 """.
 -endif.
--spec get_range_startswith(database() | transaction(), key(), [fold_option()]) ->
+-spec get_range_startswith(tx_object(), key(), [fold_option()]) ->
     fold_future() | list(mapped_kv()) | list(kv()).
 get_range_startswith(DbOrTx, Prefix, Options) ->
     get_range(DbOrTx, Prefix, erlfdb_key:strinc(Prefix), Options).
@@ -1200,7 +1202,7 @@ This function never returns a `t:fold_future/0`. Use `[{wait, false}]` with `get
 want future semantics.
 """.
 -endif.
--spec get_mapped_range(database() | transaction(), key(), key(), mapper()) -> list(mapped_kv()).
+-spec get_mapped_range(tx_object(), key(), key(), mapper()) -> list(mapped_kv()).
 get_mapped_range(DbOrTx, StartKey, EndKey, Mapper) ->
     get_mapped_range(DbOrTx, StartKey, EndKey, Mapper, []).
 
@@ -1264,7 +1266,7 @@ The `Result` includes **both** of our setup key-value pairs using only a single 
 the FoundationDB server.
 """.
 -endif.
--spec get_mapped_range(database() | transaction(), key(), key(), mapper(), [fold_option()]) ->
+-spec get_mapped_range(tx_object(), key(), key(), mapper(), [fold_option()]) ->
     fold_future() | list(mapped_kv()).
 get_mapped_range(DbOrTx, StartKey, EndKey, Mapper, Options) ->
     get_range(
@@ -1281,7 +1283,7 @@ Returns a list of keys that can split the given range into (roughly) equally siz
 *C API function*: [`fdb_transaction_get_range_split_points`](https://apple.github.io/foundationdb/api-c.html#c.fdb_transaction_get_range_split_points)
 """.
 -endif.
--spec get_range_split_points(database() | transaction(), key(), key(), [split_option()]) ->
+-spec get_range_split_points(tx_object(), key(), key(), [split_option()]) ->
     future() | list(key()).
 get_range_split_points(?IS_DB = Db, StartKey, EndKey, Options) ->
     transactional(Db, fun(Tx) ->
@@ -1291,14 +1293,16 @@ get_range_split_points(?IS_DB = Db, StartKey, EndKey, Options) ->
 get_range_split_points(?IS_TX = Tx, StartKey, EndKey, Options) ->
     % 10M
     ChunkSize = erlfdb_util:get(Options, chunk_size, 10000000),
-    erlfdb_nif:transaction_get_range_split_points(Tx, StartKey, EndKey, ChunkSize).
+    erlfdb_nif:transaction_get_range_split_points(Tx, StartKey, EndKey, ChunkSize);
+get_range_split_points(?IS_SS = SS, StartKey, EndKey, Options) ->
+    get_range_split_points(?GET_TX(SS), StartKey, EndKey, Options).
 
 -if(?DOCATTRS).
 -doc """
 Equivalent to `fold_range(DbOrTex, StartKey, EndKey, Fun, [])`.
 """.
 -endif.
--spec fold_range(database() | transaction(), key(), key(), function(), any()) -> any().
+-spec fold_range(tx_object(), key(), key(), function(), any()) -> any().
 fold_range(DbOrTx, StartKey, EndKey, Fun, Acc) ->
     fold_range(DbOrTx, StartKey, EndKey, Fun, Acc, []).
 
@@ -1311,7 +1315,7 @@ Gets a range of key-value pairs. Executes a reducing function as the pairs are r
 > Use `get_range/5` with `wait_for_all_interleaving/2` instead.
 """.
 -endif.
--spec fold_range(database() | transaction(), key(), key(), function(), any(), [fold_option()]) ->
+-spec fold_range(tx_object(), key(), key(), function(), any(), [fold_option()]) ->
     any().
 fold_range(?IS_DB = Db, StartKey, EndKey, Fun, Acc, Options) ->
     transactional(Db, fun(Tx) ->
@@ -1428,7 +1432,7 @@ In a transaction with many operations:
 ```
 """.
 -endif.
--spec set(database() | transaction() | snapshot(), key(), value()) -> ok.
+-spec set(tx_object(), key(), value()) -> ok.
 set(?IS_DB = Db, Key, Value) ->
     transactional(Db, fun(Tx) ->
         set(Tx, Key, Value)
@@ -1464,7 +1468,7 @@ In a transaction with many operations:
 ```
 """.
 -endif.
--spec clear(database() | transaction() | snapshot(), key()) -> ok.
+-spec clear(tx_object(), key()) -> ok.
 clear(?IS_DB = Db, Key) ->
     transactional(Db, fun(Tx) ->
         clear(Tx, Key)
@@ -1500,7 +1504,7 @@ Clears all keys with prefix `<<"user/0">>` In a transaction with a single operat
 ```
 """.
 -endif.
--spec clear_range(database() | transaction() | snapshot(), key(), key()) -> ok.
+-spec clear_range(tx_object(), key(), key()) -> ok.
 clear_range(?IS_DB = Db, StartKey, EndKey) ->
     transactional(Db, fun(Tx) ->
         clear_range(Tx, StartKey, EndKey)
@@ -1517,7 +1521,7 @@ Equivalent to `clear_range(DbOrTx, Prefix, erlfdb_key:strinc(Prefix)).`
 *C API function*: [`fdb_transaction_clear_range`](https://apple.github.io/foundationdb/api-c.html#c.fdb_transaction_clear_range)
 """.
 -endif.
--spec clear_range_startswith(database() | transaction() | snapshot(), key()) -> ok.
+-spec clear_range_startswith(tx_object(), key()) -> ok.
 clear_range_startswith(?IS_DB = Db, Prefix) ->
     transactional(Db, fun(Tx) ->
         clear_range_startswith(Tx, Prefix)
@@ -1537,7 +1541,7 @@ Performs an atomic add on the value in the database.
 See `FDBMutationType.FDB_MUTATION_TYPE_ADD`.
 """.
 -endif.
--spec add(database() | transaction() | snapshot(), key(), atomic_operand()) -> ok.
+-spec add(tx_object(), key(), atomic_operand()) -> ok.
 add(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, add).
 
@@ -1550,7 +1554,7 @@ Performs an atomic bitwise 'and' on the value in the database.
 See `FDBMutationType.FDB_MUTATION_TYPE_AND`.
 """.
 -endif.
--spec bit_and(database() | transaction() | snapshot(), key(), atomic_operand()) -> ok.
+-spec bit_and(tx_object(), key(), atomic_operand()) -> ok.
 bit_and(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, bit_and).
 
@@ -1563,7 +1567,7 @@ Performs an atomic bitwise 'or' on the value in the database.
 See `FDBMutationType.FDB_MUTATION_TYPE_OR`.
 """.
 -endif.
--spec bit_or(database() | transaction() | snapshot(), key(), atomic_operand()) -> ok.
+-spec bit_or(tx_object(), key(), atomic_operand()) -> ok.
 bit_or(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, bit_or).
 
@@ -1576,7 +1580,7 @@ Performs an atomic bitwise 'xor' on the value in the database.
 See `FDBMutationType.FDB_MUTATION_TYPE_XOR`.
 """.
 -endif.
--spec bit_xor(database() | transaction() | snapshot(), key(), atomic_operand()) -> ok.
+-spec bit_xor(tx_object(), key(), atomic_operand()) -> ok.
 bit_xor(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, bit_xor).
 
@@ -1589,7 +1593,7 @@ Performs an atomic minimum on the value in the database.
 See `FDBMutationType.FDB_MUTATION_TYPE_MIN`.
 """.
 -endif.
--spec min(database() | transaction() | snapshot(), key(), atomic_operand()) -> ok.
+-spec min(tx_object(), key(), atomic_operand()) -> ok.
 min(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, min).
 
@@ -1602,7 +1606,7 @@ Performs an atomic maximum on the value in the database.
 See `FDBMutationType.FDB_MUTATION_TYPE_MAX`.
 """.
 -endif.
--spec max(database() | transaction() | snapshot(), key(), atomic_operand()) -> ok.
+-spec max(tx_object(), key(), atomic_operand()) -> ok.
 max(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, max).
 
@@ -1615,7 +1619,7 @@ Performs an atomic lexocogrpahic minimum on the value in the database.
 See `FDBMutationType.FDB_MUTATION_TYPE_BYTE_MIN`.
 """.
 -endif.
--spec byte_min(database() | transaction() | snapshot(), key(), atomic_operand()) -> ok.
+-spec byte_min(tx_object(), key(), atomic_operand()) -> ok.
 byte_min(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, byte_min).
 
@@ -1628,7 +1632,7 @@ Performs an atomic lexocogrpahic maximum on the value in the database.
 See `FDBMutationType.FDB_MUTATION_TYPE_BYTE_MAX`.
 """.
 -endif.
--spec byte_max(database() | transaction() | snapshot(), key(), atomic_operand()) -> ok.
+-spec byte_max(tx_object(), key(), atomic_operand()) -> ok.
 byte_max(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, byte_max).
 
@@ -1641,7 +1645,7 @@ Transforms key using a versionstamp for the transaction.
 See `FDBMutationType.FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY`.
 """.
 -endif.
--spec set_versionstamped_key(database() | transaction() | snapshot(), key(), atomic_operand()) ->
+-spec set_versionstamped_key(tx_object(), key(), atomic_operand()) ->
     ok.
 set_versionstamped_key(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, set_versionstamped_key).
@@ -1655,7 +1659,7 @@ Transforms param using a versionstamp for the transaction.
 See `FDBMutationType.FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE`.
 """.
 -endif.
--spec set_versionstamped_value(database() | transaction() | snapshot(), key(), atomic_operand()) ->
+-spec set_versionstamped_value(tx_object(), key(), atomic_operand()) ->
     ok.
 set_versionstamped_value(DbOrTx, Key, Param) ->
     atomic_op(DbOrTx, Key, Param, set_versionstamped_value).
@@ -1667,7 +1671,7 @@ Performs one of the available atomic operations.
 *C API function*: [`fdb_transaction_atomic_op`](https://apple.github.io/foundationdb/api-c.html#c.fdb_transaction_atomic_op)
 """.
 -endif.
--spec atomic_op(database() | transaction() | snapshot(), key(), atomic_operand(), atomic_mode()) ->
+-spec atomic_op(tx_object(), key(), atomic_operand(), atomic_mode()) ->
     ok.
 atomic_op(?IS_DB = Db, Key, Param, Op) ->
     transactional(Db, fun(Tx) ->
@@ -1683,7 +1687,7 @@ atomic_op(?IS_SS = SS, Key, Param, Op) ->
 Equivalent to `watch(DbOrTx, Key, []).`
 """.
 -endif.
--spec watch(database() | transaction() | snapshot(), key()) -> future().
+-spec watch(tx_object(), key()) -> future().
 watch(DbTxSS, Key) ->
     watch(DbTxSS, Key, []).
 
@@ -1724,7 +1728,7 @@ ready message (`t:watch_future_ready_message/0`) is valid only for futures creat
 ```
 """.
 -endif.
--spec watch(database() | transaction() | snapshot(), key(), list(watch_option())) -> future().
+-spec watch(tx_object(), key(), list(watch_option())) -> future().
 watch(?IS_DB = Db, Key, Options) ->
     transactional(Db, fun(Tx) ->
         watch(Tx, Key, Options)
@@ -2025,7 +2029,7 @@ Returns a list of public network addresses as strings, one for each of the stora
 *C API function*: [`fdb_transaction_get_addresses_for_key`](https://apple.github.io/foundationdb/api-c.html#c.fdb_transaction_get_addresses_for_key)
 """.
 -endif.
--spec get_addresses_for_key(database() | transaction() | snapshot(), key()) -> future() | result().
+-spec get_addresses_for_key(tx_object(), key()) -> future() | result().
 get_addresses_for_key(?IS_DB = Db, Key) ->
     transactional(Db, fun(Tx) ->
         wait(get_addresses_for_key(Tx, Key))

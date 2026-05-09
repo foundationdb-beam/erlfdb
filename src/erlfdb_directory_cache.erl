@@ -116,6 +116,7 @@ Creates a new ETS-backed directory cache using `erlfdb_directory_cache` as
 the table name. Equivalent to `new(erlfdb_directory_cache, [])`.
 """.
 -endif.
+-spec new() -> ets:tid().
 new() ->
     new(?MODULE, []).
 
@@ -125,6 +126,7 @@ Creates a new ETS-backed directory cache registered publicly with the given name
 Equivalent to `new(Name, [])`.
 """.
 -endif.
+-spec new(atom()) -> ets:tid().
 new(Name) ->
     new(Name, []).
 
@@ -138,6 +140,7 @@ identifier and can be passed to `open/4`, `create_or_open/4`, `store/3`, and
 `invalidate/3`.
 """.
 -endif.
+-spec new(atom(), [term()]) -> ets:tid().
 new(Name, _Options) ->
     ets:new(Name, [
         named_table,
@@ -152,6 +155,8 @@ Opens a directory at `Path` under `Root`, using the default cache table.
 Equivalent to `open(erlfdb_directory_cache, TxObj, Root, Path)`.
 """.
 -endif.
+-spec open(erlfdb:tx_object(), erlfdb_directory:t(), erlfdb_directory:path()) ->
+    erlfdb_directory:t().
 open(TxObj, Root, Path) ->
     open(?MODULE, TxObj, Root, Path).
 
@@ -165,6 +170,8 @@ and the result is stored in `Table`. Raises `{erlfdb_directory, {open_error,
 path_missing, Path}}` if the directory does not exist; errors are not cached.
 """.
 -endif.
+-spec open(ets:table(), erlfdb:tx_object(), erlfdb_directory:t(), erlfdb_directory:path()) ->
+    erlfdb_directory:t().
 open(Table, TxObj, Root, Path) ->
     open_with_cache(Table, TxObj, Root, Path, fun erlfdb_directory:open/3).
 
@@ -174,6 +181,8 @@ Opens or creates a directory at `Path` under `Root`, using the default cache
 table. Equivalent to `create_or_open(erlfdb_directory_cache, TxObj, Root, Path)`.
 """.
 -endif.
+-spec create_or_open(erlfdb:tx_object(), erlfdb_directory:t(), erlfdb_directory:path()) ->
+    erlfdb_directory:t().
 create_or_open(TxObj, Root, Path) ->
     create_or_open(?MODULE, TxObj, Root, Path).
 
@@ -186,6 +195,9 @@ On a cache miss the directory is resolved (and created if necessary) via
 `erlfdb_directory:create_or_open/3` and the result is stored in `Table`.
 """.
 -endif.
+-spec create_or_open(
+    ets:table(), erlfdb:tx_object(), erlfdb_directory:t(), erlfdb_directory:path()
+) -> erlfdb_directory:t().
 create_or_open(Table, TxObj, Root, Path) ->
     open_with_cache(Table, TxObj, Root, Path, fun erlfdb_directory:create_or_open/3).
 
@@ -195,6 +207,7 @@ Stores `Node` in the default cache table under `Root`.
 Equivalent to `store(erlfdb_directory_cache, Root, Node)`.
 """.
 -endif.
+-spec store(erlfdb_directory:t(), erlfdb_directory:t()) -> true.
 store(Root, Node) ->
     store(?MODULE, Root, Node).
 
@@ -213,6 +226,7 @@ uses `ets:insert/2` rather than `ets:insert_new/2`, so it overwrites any
 previously cached entry for the same path.
 """.
 -endif.
+-spec store(ets:table(), erlfdb_directory:t(), erlfdb_directory:t()) -> true.
 store(Table, Root, Node) ->
     RootPathLen = length(erlfdb_directory:get_path(Root)),
     AbsPath = erlfdb_directory:get_path(Node),
@@ -225,6 +239,7 @@ Removes the entry for `Path` under `Root` from the default cache table.
 Equivalent to `invalidate(erlfdb_directory_cache, Root, Path)`.
 """.
 -endif.
+-spec invalidate(erlfdb_directory:t(), erlfdb_directory:path()) -> true.
 invalidate(Root, Path) ->
     invalidate(?MODULE, Root, Path).
 
@@ -237,6 +252,7 @@ Call this co-located with any `erlfdb_directory:move/4` or
 `erlfdb_directory:remove/3` on the same path.
 """.
 -endif.
+-spec invalidate(ets:table(), erlfdb_directory:t(), erlfdb_directory:path()) -> true.
 invalidate(Table, Root, Path) ->
     ets:delete(Table, path_key(Root, Path)).
 
@@ -246,6 +262,7 @@ Deletes all entries from the default cache table.
 Equivalent to `purge(erlfdb_directory_cache, -1)`.
 """.
 -endif.
+-spec purge() -> non_neg_integer().
 purge() ->
     purge(?MODULE, -1).
 
@@ -255,6 +272,7 @@ Deletes all entries from `Table`.
 Equivalent to `purge(Table, -1)`.
 """.
 -endif.
+-spec purge(ets:table()) -> non_neg_integer().
 purge(Table) ->
     purge(Table, -1).
 
@@ -268,13 +286,23 @@ equivalent to clearing the entire table.
 Periodic purging can be scheduled with `timer:apply_interval(Ttl, erlfdb_directory_cache, purge, [Table, Ttl])`.
 """.
 -endif.
+-spec purge(ets:table(), integer()) -> non_neg_integer().
 purge(Table, Ttl) ->
     Cutoff = erlang:monotonic_time(millisecond) - Ttl,
     ets:select_delete(Table, [{{'_', '_', '$1'}, [{'<', '$1', Cutoff}], [true]}]).
 
+-spec path_key(erlfdb_directory:t(), erlfdb_directory:path()) ->
+    {binary(), erlfdb_directory:path()}.
 path_key(Root, Path) ->
     {erlfdb_directory:get_node_prefix(Root), Path}.
 
+-spec open_with_cache(
+    ets:table(),
+    erlfdb:tx_object(),
+    erlfdb_directory:t(),
+    erlfdb_directory:path(),
+    fun((erlfdb:tx_object(), erlfdb_directory:t(), erlfdb_directory:path()) -> erlfdb_directory:t())
+) -> erlfdb_directory:t().
 open_with_cache(Table, TxObj, Root, Path, Func) ->
     Key = path_key(Root, Path),
     case ets:lookup(Table, Key) of

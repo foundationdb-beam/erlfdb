@@ -6,6 +6,9 @@
 
  * (#75) Added `erlfdb_directory_cache`: a simple ETS-driven cache for storing open directories.
  * (#76) Added `mix.exs` for proper compilation using Mix in Elixir projects
+ * Added `m:erlfdb_directory_cache`: a simple ETS-driven cache for storing open directories.
+ * Added type spec `t:erlfdb:tx_object/0` to represent `database() | transacation() | snapshot()` succinctly.
+ * Added type specs to `m:erlfdb_directory` and `m:erlfdb_tuple`
  
 ### Bug fixes
 

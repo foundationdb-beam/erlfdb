@@ -72,15 +72,103 @@
 -define(DEFAULT_NODE_PREFIX, <<16#FE>>).
 -define(SUBDIRS, 0).
 
+-type path_item() :: binary() | {utf8, binary()}.
+-type path() :: path_item() | list() | tuple().
+
+-type root_option() ::
+    {node_prefix, binary()}
+    | {content_prefix, binary()}
+    | {allow_manual_names, boolean()}.
+
+-type open_option() ::
+    {layer, binary()}.
+
+-type create_option() ::
+    {layer, binary()}
+    | {node_name, binary()}.
+
+-if(?DOCATTRS).
+-doc """
+A partition is a directory that acts as its own independent root, with its own
+node-prefix space and HCA allocator. Key allocation for everything underneath a
+partition is managed by the partition itself rather than by any ancestor root,
+giving it a completely separate key namespace.
+
+Because a partition is a root and not a leaf, `get_subspace/1` raises an error
+on a partition — data is stored in ordinary directories beneath it.
+
+The absolute root (returned by `root/0`) is also represented as a partition.
+""".
+-endif.
+-type partition() :: #{
+    id := binary(),
+    node_prefix := binary(),
+    content_prefix := binary(),
+    allocator := term(),
+    allow_manual_names := boolean(),
+    name => binary(),
+    root => t(),
+    path => [path_item()],
+    is_partition => true,
+    is_absolute_root => true,
+    get_id := fun((t()) -> binary()),
+    get_name => fun((t()) -> binary()),
+    get_root := fun((t()) -> t()),
+    get_root_for_path := fun((t(), path()) -> t()),
+    get_partition := fun((t()) -> t()),
+    get_node_prefix := fun((t()) -> binary()),
+    get_path := fun((t()) -> [path_item()]),
+    get_layer := fun((t()) -> binary()),
+    get_subspace := fun((t()) -> term())
+}.
+
+-if(?DOCATTRS).
+-doc """
+A directory is a named subdirectory within a root or partition. Its keys are
+allocated by the root's HCA allocator and stored under a content prefix derived
+from that allocated node name. The `layer` field is an arbitrary binary that
+applications use to tag what kind of data lives in the directory (e.g.
+`<<"tenant">>`). `get_subspace/1` returns a usable subspace for reading and
+writing key-value data.
+""".
+-endif.
+-type directory() :: #{
+    id := binary(),
+    name := binary(),
+    root := t(),
+    path := [path_item()],
+    layer := binary(),
+    get_id := fun((t()) -> binary()),
+    get_name := fun((t()) -> binary()),
+    get_root := fun((t()) -> t()),
+    get_root_for_path := fun((t(), path()) -> t()),
+    get_partition := fun((t()) -> t()),
+    get_node_prefix := fun((t()) -> binary()),
+    get_path := fun((t()) -> [path_item()]),
+    get_layer := fun((t()) -> binary()),
+    get_subspace := fun((t()) -> term())
+}.
+
+-if(?DOCATTRS).
+-doc "A directory layer node — either a `partition()` (root) or a `directory()` (leaf).".
+-endif.
+-type t() :: partition() | directory().
+
+-export_type([t/0, path/0, partition/0, directory/0, root_option/0, open_option/0, create_option/0]).
+
+-spec root() -> partition().
 root() ->
     init_root([]).
 
+-spec root([root_option()]) -> partition().
 root(Options) ->
     init_root(Options).
 
+-spec create_or_open(erlfdb:tx_object(), t(), path()) -> t().
 create_or_open(TxObj, Node, Path) ->
     create_or_open(TxObj, Node, Path, <<>>).
 
+-spec create_or_open(erlfdb:tx_object(), t(), path(), binary()) -> t().
 create_or_open(TxObj, Node, PathIn, Layer) ->
     {Root, Path} = adj_path(Node, PathIn),
     if
@@ -94,9 +182,11 @@ create_or_open(TxObj, Node, PathIn, Layer) ->
             Else
     end.
 
+-spec create(erlfdb:tx_object(), t(), path()) -> t().
 create(TxObj, Node, Path) ->
     create(TxObj, Node, Path, []).
 
+-spec create(erlfdb:tx_object(), t(), path(), [create_option()]) -> t().
 create(TxObj, Node, PathIn, Options) ->
     {Root, Path} = adj_path(Node, PathIn),
     check_manual_node_name(Root, Options),
@@ -106,9 +196,11 @@ create(TxObj, Node, PathIn, Options) ->
         create_int(Tx, Root, Path, Layer, NodeName)
     end).
 
+-spec open(erlfdb:tx_object(), t(), path()) -> t().
 open(TxObj, Node, Path) ->
     open(TxObj, Node, Path, []).
 
+-spec open(erlfdb:tx_object(), t(), path(), [open_option()]) -> t().
 open(TxObj, Node, PathIn, Options) ->
     {Root, Path} = adj_path(Node, PathIn),
     if
@@ -120,9 +212,11 @@ open(TxObj, Node, PathIn, Options) ->
         open_int(Tx, Root, Path, Layer)
     end).
 
+-spec list(erlfdb:tx_object(), t()) -> [{path_item(), t()}].
 list(TxObj, Node) ->
     list(TxObj, Node, {}).
 
+-spec list(erlfdb:tx_object(), t(), path()) -> [{path_item(), t()}].
 list(TxObj, Node, PathIn) ->
     {Root, Path} = adj_path(Node, PathIn),
     erlfdb:transactional(TxObj, fun(Tx) ->
@@ -147,9 +241,11 @@ list(TxObj, Node, PathIn) ->
         end
     end).
 
+-spec exists(erlfdb:tx_object(), t()) -> boolean().
 exists(TxObj, Node) ->
     exists(TxObj, Node, {}).
 
+-spec exists(erlfdb:tx_object(), t(), path()) -> boolean().
 exists(TxObj, Node, PathIn) ->
     %Root = get_root(Node),
     Root = get_root_for_path(Node, PathIn),
@@ -164,6 +260,7 @@ exists(TxObj, Node, PathIn) ->
         end
     end).
 
+-spec move(erlfdb:tx_object(), t(), path(), path()) -> t().
 move(TxObj, Node, OldPathIn, NewPathIn) ->
     {Root, OldPath} = adj_path(Node, OldPathIn),
     {Root, NewPath} = adj_path(Node, NewPathIn),
@@ -198,6 +295,7 @@ move(TxObj, Node, OldPathIn, NewPathIn) ->
         end
     end).
 
+-spec move_to(erlfdb:tx_object(), t(), path()) -> t().
 move_to(_TxObj, #{is_absolute_root := true}, _NewPath) ->
     ?ERLFDB_ERROR({move_error, root_cannot_be_moved});
 move_to(TxObj, Node, NewAbsPathIn) ->
@@ -215,69 +313,90 @@ move_to(TxObj, Node, NewAbsPathIn) ->
     TgtPath = lists:nthtail(RootPathLen, NewAbsPath),
     move(TxObj, Root, SrcPath, TgtPath).
 
+-spec remove(erlfdb:tx_object(), t()) -> ok.
 remove(TxObj, Node) ->
     remove_int(TxObj, Node, {}, false).
 
+-spec remove(erlfdb:tx_object(), t(), path()) -> ok.
 remove(TxObj, Node, Path) ->
     remove_int(TxObj, Node, Path, false).
 
+-spec remove_if_exists(erlfdb:tx_object(), t()) -> ok.
 remove_if_exists(TxObj, Node) ->
     remove_int(TxObj, Node, {}, true).
 
+-spec remove_if_exists(erlfdb:tx_object(), t(), path()) -> ok.
 remove_if_exists(TxObj, Node, Path) ->
     remove_int(TxObj, Node, Path, true).
 
+-spec get_id(t()) -> binary().
 get_id(Node) ->
     invoke(Node, get_id, []).
 
+-spec get_name(t()) -> binary().
 get_name(Node) ->
     invoke(Node, get_name, []).
 
+-spec get_root(t()) -> t().
 get_root(Node) ->
     invoke(Node, get_root, []).
 
+-spec get_root_for_path(t(), path()) -> t().
 get_root_for_path(Node, Path) ->
     invoke(Node, get_root_for_path, [Path]).
 
 get_partition(Node) ->
     invoke(Node, get_partition, []).
 
+-spec get_node_prefix(t()) -> binary().
 get_node_prefix(Node) ->
     invoke(Node, get_node_prefix, []).
 
+-spec get_path(t()) -> [path_item()].
 get_path(Node) ->
     invoke(Node, get_path, []).
 
+-spec get_layer(t()) -> binary().
 get_layer(Node) ->
     invoke(Node, get_layer, []).
 
+-spec get_subspace(t()) -> term().
 get_subspace(Node) ->
     invoke(Node, get_subspace, []).
 
+-spec subspace(t(), tuple()) -> term().
 subspace(Node, Tuple) ->
     erlfdb_subspace:create(get_subspace(Node), Tuple).
 
+-spec key(t()) -> binary().
 key(Node) ->
     erlfdb_subspace:key(get_subspace(Node)).
 
+-spec pack(t(), tuple()) -> binary().
 pack(Node, Tuple) ->
     erlfdb_subspace:pack(get_subspace(Node), Tuple).
 
+-spec pack_vs(t(), tuple()) -> binary().
 pack_vs(Node, Tuple) ->
     erlfdb_subspace:pack_vs(get_subspace(Node), Tuple).
 
+-spec unpack(t(), binary()) -> tuple().
 unpack(Node, Key) ->
     erlfdb_subspace:unpack(get_subspace(Node), Key).
 
+-spec range(t()) -> {binary(), binary()}.
 range(Node) ->
     range(Node, {}).
 
+-spec range(t(), tuple()) -> {binary(), binary()}.
 range(Node, Tuple) ->
     erlfdb_subspace:range(get_subspace(Node), Tuple).
 
+-spec contains(t(), binary()) -> boolean().
 contains(Node, Key) ->
     erlfdb_subspace:contains(get_subspace(Node), Key).
 
+-spec debug_nodes(erlfdb:tx_object(), t()) -> ok | nil.
 debug_nodes(TxObj, _Node) ->
     erlfdb:fold_range(
         TxObj,
@@ -292,6 +411,7 @@ debug_nodes(TxObj, _Node) ->
         nil
     ).
 
+-spec invoke(t() | not_found, atom(), [term()]) -> term().
 invoke(not_found, _, _) ->
     erlang:error(broken);
 invoke(Node, FunName, Args) ->
@@ -302,6 +422,7 @@ invoke(Node, FunName, Args) ->
             ?ERLFDB_ERROR({op_not_supported, FunName, Node})
     end.
 
+-spec init_root([root_option()]) -> partition().
 init_root(Options) ->
     DefNodePref = ?DEFAULT_NODE_PREFIX,
     NodePrefix = erlfdb_util:get(Options, node_prefix, DefNodePref),
@@ -329,6 +450,7 @@ init_root(Options) ->
         end
     }.
 
+-spec init_node(erlfdb:transaction(), t(), binary(), path_item()) -> t().
 init_node(Tx, Node, NodeName, PathName) ->
     NodePrefix = get_node_prefix(Node),
     NodeLayerId = ?ERLFDB_PACK(NodePrefix, {NodeName, <<"layer">>}),
@@ -346,6 +468,7 @@ init_node(Tx, Node, NodeName, PathName) ->
             init_directory(Node, NodeName, PathName, Layer)
     end.
 
+-spec init_partition(t(), binary(), path()) -> partition().
 init_partition(ParentNode, NodeName, PathName) ->
     NodeNameLen = size(NodeName),
     NodePrefix = <<NodeName:NodeNameLen/binary, 16#FE>>,
@@ -381,6 +504,7 @@ init_partition(ParentNode, NodeName, PathName) ->
         end
     }.
 
+-spec init_directory(t(), binary(), binary(), path()) -> directory().
 init_directory(ParentNode, NodeName, PathName, Layer) ->
     NodePrefix = get_node_prefix(ParentNode),
     ParentPath = get_path(ParentNode),
@@ -410,6 +534,7 @@ init_directory(ParentNode, NodeName, PathName, Layer) ->
         end
     }.
 
+-spec find(erlfdb:transaction(), t(), [path_item()]) -> t() | not_found.
 find(_Tx, Node, []) ->
     Node;
 find(Tx, Node, [PathName | RestPath]) ->
@@ -422,6 +547,7 @@ find(Tx, Node, [PathName | RestPath]) ->
             find(Tx, ChildNode, RestPath)
     end.
 
+-spec find_deepest(erlfdb:transaction(), t(), [path_item()]) -> t().
 find_deepest(_Tx, Node, []) ->
     Node;
 find_deepest(Tx, Node, [PathName | RestPath]) ->
@@ -434,6 +560,7 @@ find_deepest(Tx, Node, [PathName | RestPath]) ->
             find_deepest(Tx, ChildNode, RestPath)
     end.
 
+-spec create_or_open_int(erlfdb:tx_object(), t(), [path_item()], binary()) -> t().
 create_or_open_int(_TxObj, Node, [], LayerIn) ->
     Layer =
         case LayerIn of
@@ -474,6 +601,7 @@ create_or_open_int(TxObj, Node, PathIn, Layer) ->
         end
     end).
 
+-spec create_int(erlfdb:transaction(), t(), path(), binary(), binary() | undefined) -> t().
 create_int(Tx, Node, PathIn, Layer, NodeNameIn) ->
     Path = path_init(PathIn),
     try
@@ -484,20 +612,17 @@ create_int(Tx, Node, PathIn, Layer, NodeNameIn) ->
             Deepest = find_deepest(Tx, Node, Path),
             NodeName = create_node_name(Tx, Deepest, NodeNameIn),
             {ParentPath, [PathName]} = lists:split(length(Path) - 1, Path),
-            case create_or_open_int(Tx, Node, ParentPath, <<>>) of
-                not_found ->
-                    ?ERLFDB_ERROR({create_error, missing_parent, ParentPath});
-                Parent ->
-                    check_version(Tx, Parent, write),
-                    create_node(Tx, Parent, PathName, NodeName, Layer),
-                    R = find(Tx, Parent, [PathName]),
-                    if
-                        R /= not_found -> R;
-                        true -> erlang:error(broken)
-                    end
+            Parent = create_or_open_int(Tx, Node, ParentPath, <<>>),
+            check_version(Tx, Parent, write),
+            create_node(Tx, Parent, PathName, NodeName, Layer),
+            R = find(Tx, Parent, [PathName]),
+            if
+                R /= not_found -> R;
+                true -> erlang:error(broken)
             end
     end.
 
+-spec create_node(erlfdb:transaction(), t(), path_item(), binary(), binary() | undefined) -> ok.
 create_node(Tx, Parent, PathName, NodeName, LayerIn) ->
     NodeEntryId = ?ERLFDB_PACK(get_id(Parent), {?SUBDIRS, PathName}),
     erlfdb:set(Tx, NodeEntryId, NodeName),
@@ -511,6 +636,7 @@ create_node(Tx, Parent, PathName, NodeName, LayerIn) ->
         end,
     erlfdb:set(Tx, NodeLayerId, Layer).
 
+-spec open_int(erlfdb:transaction(), t(), path(), binary()) -> t().
 open_int(Tx, Node, PathIn, Layer) ->
     check_version(Tx, Node, read),
     Path = path_init(PathIn),
@@ -528,6 +654,7 @@ open_int(Tx, Node, PathIn, Layer) ->
             Opened
     end.
 
+-spec remove_int(erlfdb:tx_object(), t(), path(), boolean()) -> ok.
 remove_int(TxObj, Node, PathIn, IgnoreMissing) ->
     Root = get_root_for_path(Node, PathIn),
     {Root, Path} = adj_path(Root, Node, PathIn),
@@ -546,6 +673,7 @@ remove_int(TxObj, Node, PathIn, IgnoreMissing) ->
         end
     end).
 
+-spec remove_recursive(erlfdb:transaction(), t()) -> ok.
 remove_recursive(Tx, Node) ->
     % Remove all subdirectories
     lists:foreach(
@@ -565,6 +693,7 @@ remove_recursive(Tx, Node) ->
     {NodeStart, NodeEnd} = erlfdb_subspace:range(NodeSubspace),
     erlfdb:clear_range(Tx, NodeStart, NodeEnd).
 
+-spec remove_from_parent(erlfdb:transaction(), t()) -> ok.
 remove_from_parent(Tx, Node) ->
     {Root, Path} = adj_path(get_root_for_path(Node, []), Node, []),
     {ParentPath, [PathName]} = lists:split(length(Path) - 1, Path),
@@ -573,6 +702,7 @@ remove_from_parent(Tx, Node) ->
     NodeEntryId = ?ERLFDB_PACK(get_id(Parent), {?SUBDIRS, PathName}),
     erlfdb:clear(Tx, NodeEntryId).
 
+-spec check_manual_node_name(partition(), [create_option()]) -> ok.
 check_manual_node_name(Root, Options) ->
     AllowManual = maps:get(allow_manual_names, Root),
     IsManual = lists:keyfind(node_name, 1, Options) /= false,
@@ -581,6 +711,7 @@ check_manual_node_name(Root, Options) ->
         true -> ?ERLFDB_ERROR({create_error, manual_node_names_prohibited})
     end.
 
+-spec create_node_name(erlfdb:transaction(), t(), binary() | null | undefined) -> binary().
 create_node_name(Tx, Parent, NameIn) ->
     #{
         content_prefix := ContentPrefix,
@@ -636,6 +767,7 @@ create_node_name(Tx, Parent, NameIn) ->
             ?ERLFDB_ERROR({create_error, manual_node_names_prohibited})
     end.
 
+-spec is_prefix_free(erlfdb:transaction() | erlfdb:snapshot(), t(), binary()) -> boolean().
 is_prefix_free(Tx, Parent, NodeName) ->
     % We have to make sure that NodeName does not interact with
     % anything that currently exists in the tree. This means that
@@ -701,6 +833,7 @@ is_prefix_free(Tx, Parent, NodeName) ->
             false
     end.
 
+-spec bin_startswith(binary(), binary()) -> boolean().
 bin_startswith(Subject, Prefix) ->
     PrefixLen = size(Prefix),
     case Subject of
@@ -708,6 +841,7 @@ bin_startswith(Subject, Prefix) ->
         _ -> false
     end.
 
+-spec check_version(erlfdb:transaction(), t(), read | write) -> ok.
 check_version(Tx, Node, PermLevel) ->
     Root = get_root(Node),
     VsnKey = ?ERLFDB_EXTEND(get_id(Root), <<"version">>),
@@ -739,6 +873,8 @@ check_version(Tx, Node, PermLevel) ->
         true -> ?ERLFDB_ERROR({version_error, unwritable, Path, {Major, Minor, Patch}})
     end.
 
+-spec initialize_directory(erlfdb:transaction(), binary()) ->
+    {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 initialize_directory(Tx, VsnKey) ->
     {V1, V2, V3} = ?LAYER_VERSION,
     Packed = <<
@@ -749,6 +885,7 @@ initialize_directory(Tx, VsnKey) ->
     erlfdb:set(Tx, VsnKey, Packed),
     ?LAYER_VERSION.
 
+-spec check_same_partition(t(), t()) -> ok.
 check_same_partition(OldNode, NewParentNode) ->
     OldRoot = get_partition(OldNode),
     NewRoot = get_root(NewParentNode),
@@ -757,9 +894,11 @@ check_same_partition(OldNode, NewParentNode) ->
         true -> ?ERLFDB_ERROR({move_error, partition_mismatch, OldRoot, NewRoot})
     end.
 
+-spec adj_path(t(), path()) -> {t(), [path_item()]}.
 adj_path(Node, PathIn) ->
     adj_path(get_root(Node), Node, PathIn).
 
+-spec adj_path(t(), t(), path()) -> {t(), [path_item()]}.
 adj_path(Root, Node, PathIn) ->
     RootPathLen = length(get_path(Root)),
     NodePath = get_path(Node),
@@ -767,6 +906,7 @@ adj_path(Root, Node, PathIn) ->
     Path = NodeRelPath ++ path_init(PathIn),
     {Root, Path}.
 
+-spec path_init(path()) -> [path_item()].
 path_init(<<_/binary>> = Bin) ->
     check_utf8(0, Bin),
     [{utf8, Bin}];
@@ -785,6 +925,7 @@ path_init(Path) when is_tuple(Path) ->
 path_init(Else) ->
     ?ERLFDB_ERROR({path_error, invalid_path_component, Else}).
 
+-spec check_utf8(non_neg_integer(), binary()) -> true.
 check_utf8(Offset, Binary) ->
     case Binary of
         <<_:Offset/binary>> ->
@@ -799,9 +940,11 @@ check_utf8(Offset, Binary) ->
             ?ERLFDB_ERROR({path_error, invalid_utf8, Binary})
     end.
 
+-spec path_append([path_item()], path()) -> [path_item()].
 path_append(Path, Part) ->
     Path ++ path_init(Part).
 
+-spec check_not_subpath([path_item()], [path_item()]) -> ok.
 check_not_subpath(OldPath, NewPath) ->
     case lists:prefix(OldPath, NewPath) of
         true ->

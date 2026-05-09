@@ -34,6 +34,29 @@
     compare/2
 ]).
 
+-export_type([elem/0, versionstamp/0]).
+
+-type float_tag() :: denormalized | infinite | nan.
+
+-type versionstamp() ::
+    {versionstamp, Id :: non_neg_integer(), Batch :: non_neg_integer()}
+    | {versionstamp, Id :: non_neg_integer(), Batch :: non_neg_integer(), Tx :: non_neg_integer()}.
+
+-type elem() ::
+    null
+    | boolean()
+    | binary()
+    | {utf8, binary()}
+    | integer()
+    | float()
+    | {float, float()}
+    | {float, float_tag(), <<_:32>>}
+    | {double, float_tag(), <<_:64>>}
+    | {uuid, <<_:128>>}
+    | {id64, integer()}
+    | versionstamp()
+    | tuple().
+
 % Codes 16#03, 16#04, 16#23, and 16#24 are reserved
 % for historical reasons.
 
@@ -151,6 +174,7 @@ Encodes the tuple into a binary.
 ```
 """.
 -endif.
+-spec pack(tuple()) -> binary().
 pack(Tuple) when is_tuple(Tuple) ->
     pack(Tuple, <<>>).
 
@@ -176,6 +200,7 @@ Encodes the prefix and tuple into a binary.
 ```
 """.
 -endif.
+-spec pack(tuple(), binary()) -> binary().
 pack(Tuple, Prefix) ->
     Elems = tuple_to_list(Tuple),
     Encoded = [encode(E, 0) || E <- Elems],
@@ -190,6 +215,7 @@ With versionstamps, encodes the tuple into a binary.
 - `{versionstamp, Id, Batch, Tx}`: Versionstamp encoding
 """.
 -endif.
+-spec pack_vs(tuple()) -> binary().
 pack_vs(Tuple) ->
     pack_vs(Tuple, <<>>).
 
@@ -198,6 +224,7 @@ pack_vs(Tuple) ->
 With versionstamps, encodes the prefix and tuple into a binary.
 """.
 -endif.
+-spec pack_vs(tuple(), binary()) -> binary().
 pack_vs(Tuple, Prefix) ->
     Elems = tuple_to_list(Tuple),
     Encoded = [encode(E, 0) || E <- Elems],
@@ -228,6 +255,7 @@ Decodes the binary into a tuple.
 ```
 """.
 -endif.
+-spec unpack(binary()) -> tuple().
 unpack(Binary) ->
     unpack(Binary, <<>>).
 
@@ -248,6 +276,7 @@ Decodes the binary into a prefix and tuple.
 ```
 """.
 -endif.
+-spec unpack(binary(), binary()) -> tuple().
 unpack(Binary, Prefix) ->
     PrefixLen = size(Prefix),
     case Binary of
@@ -268,6 +297,7 @@ unpack(Binary, Prefix) ->
 Returns a `{StartKey, EndKey}` pair of binaries that includes all possible sub-tuples.
 """.
 -endif.
+-spec range(tuple()) -> {binary(), binary()}.
 range(Tuple) ->
     range(Tuple, <<>>).
 
@@ -276,6 +306,7 @@ range(Tuple) ->
 With prefix, returns a `{StartKey, EndKey}` pair of binaries that includes all possible sub-tuples.
 """.
 -endif.
+-spec range(tuple(), binary()) -> {binary(), binary()}.
 range(Tuple, Prefix) ->
     Base = pack(Tuple, Prefix),
     {<<Base/binary, 16#00>>, <<Base/binary, 16#FF>>}.
@@ -302,11 +333,13 @@ The ordering isn't equivalent to the Erlang term ordering:
 ```
 """.
 -endif.
+-spec compare(tuple(), tuple()) -> -1 | 0 | 1.
 compare(A, B) when is_tuple(A), is_tuple(B) ->
     AElems = tuple_to_list(A),
     BElems = tuple_to_list(B),
     compare_impl(AElems, BElems).
 
+-spec compare_impl([elem()], [elem()]) -> -1 | 0 | 1.
 compare_impl([], []) ->
     0;
 compare_impl([], [_ | _]) ->
@@ -320,6 +353,7 @@ compare_impl([A | RestA], [B | RestB]) ->
         1 -> 1
     end.
 
+-spec encode(elem(), non_neg_integer()) -> iodata().
 %% erlfmt-ignore
 encode(null, 0) ->
     <<?NULL>>;
@@ -405,9 +439,12 @@ encode(Tuple, Depth) when is_tuple(Tuple) ->
 encode(BadTerm, _) ->
     erlang:error({invalid_tuple_term, BadTerm}).
 
+-spec enc_null_terminated(binary()) -> iodata().
 enc_null_terminated(Bin) ->
     enc_null_terminated(Bin, 0, []).
 
+-spec enc_null_terminated(binary(), non_neg_integer(), [{non_neg_integer(), non_neg_integer()}]) ->
+    iodata().
 enc_null_terminated(Bin, Start, Parts) ->
     case binary:match(Bin, <<?NULL>>, [{scope, {Start, byte_size(Bin) - Start}}]) of
         nomatch ->
@@ -418,6 +455,7 @@ enc_null_terminated(Bin, Start, Parts) ->
             enc_null_terminated(Bin, NStart + 1, Parts2)
     end.
 
+-spec enc_float(elem()) -> binary().
 enc_float(Float) ->
     Bin = erlfdb_float:encode(Float),
     case Bin of
@@ -427,6 +465,7 @@ enc_float(Float) ->
             <<<<(B bxor 16#FF)>> || <<B>> <= Bin>>
     end.
 
+-spec decode(binary(), non_neg_integer()) -> {[elem()], binary()}.
 %% erlfmt-ignore
 decode(<<>>, 0) ->
     {[], <<>>};
@@ -519,9 +558,12 @@ decode(<<?VS96, Id:64/big, Batch:16/big, Tx:16/big, Rest/binary>>, Depth) ->
     {Values, Tail} = decode(Rest, Depth),
     {[{versionstamp, Id, Batch, Tx} | Values], Tail}.
 
+-spec dec_null_terminated(binary()) -> {binary(), binary()}.
 dec_null_terminated(Bin) ->
     dec_null_terminated(Bin, 0, []).
 
+-spec dec_null_terminated(binary(), non_neg_integer(), [{non_neg_integer(), non_neg_integer()}]) ->
+    {binary(), binary()}.
 dec_null_terminated(Bin, Start, Parts) ->
     case binary:match(Bin, <<?NULL>>, [{scope, {Start, byte_size(Bin) - Start}}]) of
         nomatch ->
@@ -541,6 +583,7 @@ dec_null_terminated(Bin, Start, Parts) ->
             {R, <<>>}
     end.
 
+-spec dec_neg_int(binary(), pos_integer(), non_neg_integer()) -> {[elem()], binary()}.
 dec_neg_int(Bin, Size, Depth) ->
     case Bin of
         <<Raw:Size/integer-unit:8, Rest/binary>> ->
@@ -551,6 +594,7 @@ dec_neg_int(Bin, Size, Depth) ->
             erlang:error({invalid_negative_int, Size, Bin})
     end.
 
+-spec dec_pos_int(binary(), pos_integer(), non_neg_integer()) -> {[elem()], binary()}.
 dec_pos_int(Bin, Size, Depth) ->
     case Bin of
         <<Val:Size/integer-unit:8, Rest/binary>> ->
@@ -560,14 +604,20 @@ dec_pos_int(Bin, Size, Depth) ->
             erlang:error({invalid_positive_int, Size, Bin})
     end.
 
+-spec dec_float(binary()) ->
+    float() | {float, float()} | {float, float_tag(), <<_:32>>} | {double, float_tag(), <<_:64>>}.
 dec_float(<<0:1, _:7, _/binary>> = Bin) ->
     erlfdb_float:decode(<<<<(B bxor 16#FF)>> || <<B>> <= Bin>>);
 dec_float(<<Byte:8/integer, Rest/binary>>) ->
     erlfdb_float:decode(<<(Byte bxor 16#80):8/integer, Rest/binary>>).
 
+-spec find_incomplete_versionstamp(iolist()) ->
+    {found, non_neg_integer()} | {not_found, non_neg_integer()}.
 find_incomplete_versionstamp(Items) ->
     find_incomplete_versionstamp(Items, 0).
 
+-spec find_incomplete_versionstamp(iolist(), non_neg_integer()) ->
+    {found, non_neg_integer()} | {not_found, non_neg_integer()}.
 find_incomplete_versionstamp([], Pos) ->
     {not_found, Pos};
 find_incomplete_versionstamp([<<?VS80>>, ?UNSET_VERSIONSTAMP80 | Rest], Pos) ->
@@ -605,6 +655,7 @@ find_incomplete_versionstamp([Item | Rest], Pos) when is_list(Item) ->
 find_incomplete_versionstamp([Bin | Rest], Pos) when is_binary(Bin) ->
     find_incomplete_versionstamp(Rest, Pos + size(Bin)).
 
+-spec compare_elems(elem(), elem()) -> -1 | 0 | 1.
 compare_elems(A, B) ->
     CodeA = code_for(A),
     CodeB = code_for(B),
@@ -628,6 +679,7 @@ compare_elems(A, B) ->
             0
     end.
 
+-spec compare_floats(elem(), elem()) -> -1 | 0 | 1.
 compare_floats(F1, F2) ->
     B1 = pack({F1}),
     B2 = pack({F2}),
@@ -637,6 +689,7 @@ compare_floats(F1, F2) ->
         true -> 0
     end.
 
+-spec code_for(elem()) -> byte().
 code_for(null) -> ?NULL;
 code_for(<<_/binary>>) -> ?BYTES;
 code_for({utf8, <<_/binary>>}) -> ?STRING;
