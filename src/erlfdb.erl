@@ -865,25 +865,22 @@ wait_for_any(Futures, Options, ResendQ) ->
     Timeout = erlfdb_util:get(Options, timeout, infinity),
     receive
         {FutureKey, ready} = Msg when is_reference(FutureKey) orelse is_tuple(FutureKey) ->
-            case lists:keyfind(FutureKey, 2, Futures) of
+            %% Transaction futures send {{TxRef, MsgRef}, ready}; the future struct
+            %% stores only MsgRef at position 2, so try the inner element on a miss.
+            LookupKey =
+                case FutureKey of
+                    {_TxRef, InnerRef} -> InnerRef;
+                    _ -> FutureKey
+                end,
+            case lists:keyfind(LookupKey, 2, Futures) of
                 ?IS_FUTURE = Future ->
-                    lists:foreach(
-                        fun(M) ->
-                            self() ! M
-                        end,
-                        ResendQ
-                    ),
+                    lists:foreach(fun(M) -> self() ! M end, ResendQ),
                     Future;
                 _ ->
                     wait_for_any(Futures, Options, [Msg | ResendQ])
             end
     after Timeout ->
-        lists:foreach(
-            fun(M) ->
-                self() ! M
-            end,
-            ResendQ
-        ),
+        lists:foreach(fun(M) -> self() ! M end, ResendQ),
         erlang:error({timeout, Futures})
     end.
 

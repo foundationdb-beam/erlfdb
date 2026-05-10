@@ -212,10 +212,33 @@ open(TxObj, Node, PathIn, Options) ->
         open_int(Tx, Root, Path, Layer)
     end).
 
+-if(?DOCATTRS).
+-doc """
+Lists the immediate subdirectories of `Node`.
+Equivalent to `list(TxObj, Node, {})`.
+""".
+-endif.
 -spec list(erlfdb:tx_object(), t()) -> [{path_item(), t()}].
 list(TxObj, Node) ->
     list(TxObj, Node, {}).
 
+-if(?DOCATTRS).
+-doc """
+Lists the immediate subdirectories of the directory at `Path` under `Node`.
+
+Returns `[{Name, ChildNode}]` where each `Name` is a `path_item()`. In
+practice the directory layer always stores names as `{utf8, Binary}` tuples,
+so pattern matching on the first element should use that form:
+
+```erlang
+Listed = erlfdb_directory:list(Db, Root),
+Names = [N || {{utf8, N}, _Node} <- Listed].
+```
+
+Raises `{erlfdb_directory, {list_error, missing_path, Path}}` if `Path` does
+not exist under `Node`.
+""".
+-endif.
 -spec list(erlfdb:tx_object(), t(), path()) -> [{path_item(), t()}].
 list(TxObj, Node, PathIn) ->
     {Root, Path} = adj_path(Node, PathIn),

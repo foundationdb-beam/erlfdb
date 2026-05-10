@@ -9,10 +9,15 @@
  * Added `m:erlfdb_directory_cache`: a simple ETS-driven cache for storing open directories.
  * Added type spec `t:erlfdb:tx_object/0` to represent `database() | transacation() | snapshot()` succinctly.
  * Added type specs to `m:erlfdb_directory` and `m:erlfdb_tuple`
+ * (#80) Moved integration tests to common_test and greatly expanded their scope
  
 ### Bug fixes
 
  * (#76) Removed extraneous log message "===> [erlfdb] Compiling with FDB_API_VERSION=730" from rebar output
+ * (#80) Fixed broken `erlfdb:wait_for_any/1` (introduced in v0.2.2)
+ * Changed return of tenant names from list_tenants to no longer include the `?TENANT_MAP` prefix. Since
+   tenants are removed from recent main branch of FoundationDB, we are considering this change to be insufficient
+   to warrant a major version bump, even though it is a breaking API change.
 
 ## v1.1.0 (2026-03-07)
 

@@ -30,21 +30,24 @@ transactional(?IS_DB = Db, UserFun) ->
         UserFun(Tx)
     end).
 
--spec list_tenants(erlfdb:database() | erlfdb:transaction()) -> [erlfdb:tenant_name()].
+-spec list_tenants(erlfdb:database() | erlfdb:transaction()) -> [{erlfdb:tenant_name(), binary()}].
 list_tenants(DbOrTx) ->
     % Tenant names cannot start with \xff, so this is guaranteed to get all tenants
     list_tenants(DbOrTx, <<>>, <<16#FF>>, []).
 
 -spec list_tenants(erlfdb:database() | erlfdb:transaction(), erlfdb:key(), erlfdb:key(), [
     erlfdb:fold_option()
-]) -> [erlfdb:tenant_name()].
+]) -> [{erlfdb:tenant_name(), binary()}].
 list_tenants(?IS_DB = Db, Begin, End, Opts) ->
     erlfdb:transactional(Db, fun(Tx) ->
         ok = erlfdb:set_option(Tx, read_system_keys),
         erlfdb:wait(list_tenants(Tx, Begin, End, Opts))
     end);
 list_tenants(?IS_TX = Tx, Begin, End, Opts) ->
-    erlfdb:get_range(Tx, ?TENANT_MAP(Begin), ?TENANT_MAP(End), Opts).
+    Prefix = ?TENANT_MAP(<<>>),
+    PrefixLen = byte_size(Prefix),
+    Pairs = erlfdb:wait(erlfdb:get_range(Tx, ?TENANT_MAP(Begin), ?TENANT_MAP(End), Opts)),
+    [{binary:part(K, PrefixLen, byte_size(K) - PrefixLen), V} || {K, V} <- Pairs].
 
 -spec get_tenant(erlfdb:database() | erlfdb:transaction(), erlfdb:tenant_name()) ->
     erlfdb:future() | erlfdb:result().

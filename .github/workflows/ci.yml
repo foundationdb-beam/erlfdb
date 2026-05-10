@@ -17,19 +17,23 @@ jobs:
           - otp: "25"
             fdb: "7.2.2"
             eunit: true
+            ct: true
           - otp: "25"
             fdb: "7.3.62"
             eunit: true
+            ct: true
           - otp: "27.0.1"
             fdb: "7.2.2"
             eunit: true
+            ct: true
           - otp: "27.0.1"
             fdb: "7.3.62"
             eunit: true
+            ct: true
             bindingtester: true
             dialyzer: true
             fmt: true
-    name: "linux / OTP ${{ matrix.otp }} / FDB ${{ matrix.fdb }} (${{ matrix.eunit && 'eunit' || '' }}${{ matrix.bindingtester && ' bindingtester' || '' }}${{ matrix.dialyzer && ' dialyzer' || '' }}${{ matrix.fmt && ' fmt' || '' }})"
+    name: "linux / OTP ${{ matrix.otp }} / FDB ${{ matrix.fdb }} (${{ matrix.eunit && 'eunit' || '' }}${{ matrix.ct && ' ct' || '' }}${{ matrix.bindingtester && ' bindingtester' || '' }}${{ matrix.dialyzer && ' dialyzer' || '' }}${{ matrix.fmt && ' fmt' || '' }})"
     env:
       FDB_VERSION: ${{ matrix.fdb }}
     steps:
@@ -54,13 +58,16 @@ jobs:
           sudo dpkg -i foundationdb-clients_${FDB_VERSION}-1_amd64.deb
           sudo dpkg -i foundationdb-server_${FDB_VERSION}-1_amd64.deb
           fdbcli --exec 'configure tenant_mode=optional_experimental'
-        if: ${{ matrix.dialyzer || matrix.eunit || matrix.bindingtester }}
+        if: ${{ matrix.dialyzer || matrix.eunit || matrix.ct || matrix.bindingtester }}
       - name: Run dialyzer
         run: rebar3 dialyzer
         if: ${{ matrix.dialyzer }}
       - name: EUnit tests
         run: rebar3 eunit
         if: ${{ matrix.eunit }}
+      - name: Common Test
+        run: rebar3 ct
+        if: ${{ matrix.ct }}
       - name: Binding Tester
         env:
           ERL_LIBS: _build/test/lib/erlfdb/
@@ -109,7 +116,8 @@ jobs:
         include:
           - fdb: "7.3.62"
             eunit: true
-    name: "macOS / FDB ${{ matrix.fdb }} (${{ matrix.eunit && 'eunit' || '' }})"
+            ct: true
+    name: "macOS / FDB ${{ matrix.fdb }} (${{ matrix.eunit && 'eunit' || '' }}${{ matrix.ct && ' ct' || '' }})"
     env:
       FDB_VERSION: ${{ matrix.fdb }}
     steps:
@@ -123,3 +131,6 @@ jobs:
       - name: EUnit tests
         run: rebar3 eunit
         if: ${{ matrix.eunit }}
+      - name: Common Test
+        run: rebar3 ct
+        if: ${{ matrix.ct }}
