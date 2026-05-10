@@ -22,6 +22,10 @@
     create_or_open/4,
     store/2,
     store/3,
+    remove/3,
+    remove/4,
+    remove_if_exists/3,
+    remove_if_exists/4,
     invalidate/2,
     invalidate/3,
     purge/0,
@@ -232,6 +236,58 @@ store(Table, Root, Node) ->
     AbsPath = erlfdb_directory:get_path(Node),
     RelPath = lists:nthtail(RootPathLen, AbsPath),
     ets:insert(Table, {path_key(Root, RelPath), Node, erlang:monotonic_time(millisecond)}).
+
+-if(?DOCATTRS).
+-doc """
+Removes the directory at `Path` under `Root` from FDB and invalidates its
+cache entry in the default table.
+Equivalent to `remove(erlfdb_directory_cache, TxObj, Root, Path)`.
+""".
+-endif.
+-spec remove(erlfdb:tx_object(), erlfdb_directory:t(), erlfdb_directory:path()) -> ok.
+remove(TxObj, Root, Path) ->
+    remove(?MODULE, TxObj, Root, Path).
+
+-if(?DOCATTRS).
+-doc """
+Removes the directory at `Path` under `Root` from FDB and invalidates its
+cache entry in `Table`.
+
+The cache entry is invalidated before the FDB operation so that a concurrent
+reader that races the removal sees a miss rather than a stale entry. The
+invalidation is idempotent — if the surrounding transaction retries, the
+delete simply runs again with no ill effect.
+""".
+-endif.
+-spec remove(ets:table(), erlfdb:tx_object(), erlfdb_directory:t(), erlfdb_directory:path()) -> ok.
+remove(Table, TxObj, Root, Path) ->
+    invalidate(Table, Root, Path),
+    erlfdb_directory:remove(TxObj, Root, Path).
+
+-if(?DOCATTRS).
+-doc """
+Removes the directory at `Path` under `Root` from FDB (if it exists) and
+invalidates its cache entry in the default table.
+Equivalent to `remove_if_exists(erlfdb_directory_cache, TxObj, Root, Path)`.
+""".
+-endif.
+-spec remove_if_exists(erlfdb:tx_object(), erlfdb_directory:t(), erlfdb_directory:path()) -> ok.
+remove_if_exists(TxObj, Root, Path) ->
+    remove_if_exists(?MODULE, TxObj, Root, Path).
+
+-if(?DOCATTRS).
+-doc """
+Removes the directory at `Path` under `Root` from FDB if it exists, and
+invalidates its cache entry in `Table`. Unlike `remove/4`, this does not
+raise an error when the directory is absent.
+""".
+-endif.
+-spec remove_if_exists(
+    ets:table(), erlfdb:tx_object(), erlfdb_directory:t(), erlfdb_directory:path()
+) -> ok.
+remove_if_exists(Table, TxObj, Root, Path) ->
+    invalidate(Table, Root, Path),
+    erlfdb_directory:remove_if_exists(TxObj, Root, Path).
 
 -if(?DOCATTRS).
 -doc """

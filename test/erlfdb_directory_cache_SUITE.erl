@@ -33,6 +33,10 @@
     open_missing/1,
     invalidate/1,
     store/1,
+    remove/1,
+    remove_missing/1,
+    remove_if_exists/1,
+    remove_if_exists_missing/1,
     purge_all/1,
     purge_ttl/1,
     purge_keeps_fresh/1
@@ -48,6 +52,10 @@ all() ->
         open_missing,
         invalidate,
         store,
+        remove,
+        remove_missing,
+        remove_if_exists,
+        remove_if_exists_missing,
         purge_all,
         purge_ttl,
         purge_keeps_fresh
@@ -133,6 +141,45 @@ store(Config) ->
     ?assertEqual(1, ets:info(Table, size)),
     FromCache = erlfdb_directory_cache:open(Table, Db, Root, Path),
     ?assertEqual(Node, FromCache).
+
+remove(Config) ->
+    {Table, Root, Db} = setup(Config),
+    Path = [{utf8, <<"removed">>}],
+    erlfdb_directory_cache:create_or_open(Table, Db, Root, Path),
+    ?assertEqual(1, ets:info(Table, size)),
+    erlfdb_directory_cache:remove(Table, Db, Root, Path),
+    ?assertEqual(0, ets:info(Table, size)),
+    %% Directory is gone in FDB; opening it must raise path_missing.
+    ?assertError(
+        {erlfdb_directory, {open_error, path_missing, _}},
+        erlfdb_directory_cache:open(Table, Db, Root, Path)
+    ).
+
+remove_missing(Config) ->
+    {Table, Root, Db} = setup(Config),
+    Path = [{utf8, <<"never_existed">>}],
+    ?assertError(
+        {erlfdb_directory, {remove_error, path_missing, _}},
+        erlfdb_directory_cache:remove(Table, Db, Root, Path)
+    ).
+
+remove_if_exists(Config) ->
+    {Table, Root, Db} = setup(Config),
+    Path = [{utf8, <<"removed_if_exists">>}],
+    erlfdb_directory_cache:create_or_open(Table, Db, Root, Path),
+    ?assertEqual(1, ets:info(Table, size)),
+    erlfdb_directory_cache:remove_if_exists(Table, Db, Root, Path),
+    ?assertEqual(0, ets:info(Table, size)),
+    ?assertError(
+        {erlfdb_directory, {open_error, path_missing, _}},
+        erlfdb_directory_cache:open(Table, Db, Root, Path)
+    ).
+
+remove_if_exists_missing(Config) ->
+    {Table, Root, Db} = setup(Config),
+    Path = [{utf8, <<"never_existed">>}],
+    %% Must succeed without error when directory is absent.
+    ok = erlfdb_directory_cache:remove_if_exists(Table, Db, Root, Path).
 
 purge_all(Config) ->
     {Table, Root, Db} = setup(Config),
