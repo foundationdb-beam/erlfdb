@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.1 (2026-06-15)
+
+### Bug fixes
+
+ * (#83) Fix directory cache key collision and path normalization. Previously, two directories sharing the same name and root,
+   but with different paths could mistakenly collide in the `erlfdb_directory_cache`.
+
 ## v1.2.0 (2026-05-10)
 
 ### Enhancements

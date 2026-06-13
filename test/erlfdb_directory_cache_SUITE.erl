@@ -31,6 +31,9 @@
     create_or_open/1,
     open_returns_cached_node/1,
     open_missing/1,
+    equivalent_to_direct/1,
+    distinct_base_nodes_no_collision/1,
+    path_spelling_normalized/1,
     invalidate/1,
     store/1,
     remove/1,
@@ -50,6 +53,9 @@ all() ->
         create_or_open,
         open_returns_cached_node,
         open_missing,
+        equivalent_to_direct,
+        distinct_base_nodes_no_collision,
+        path_spelling_normalized,
         invalidate,
         store,
         remove,
@@ -122,6 +128,72 @@ open_missing(Config) ->
         {erlfdb_directory, {open_error, path_missing, _}},
         erlfdb_directory_cache:open(Table, Db, Root, Path)
     ).
+
+%% The defining invariant of the cache: for the same inputs,
+%% erlfdb_directory_cache:create_or_open/4 must return a directory equivalent to
+%% calling erlfdb_directory:create_or_open/3 directly — on both a cache miss and
+%% a subsequent cache hit. Exercised across path spellings, a nested path, a
+%% sub-node base, and a partition.
+equivalent_to_direct(Config) ->
+    {Table, Root, Db} = setup(Config),
+    %% Pre-build structure: a parent/child pair and a partition with a child.
+    Parent = erlfdb_directory:create_or_open(Db, Root, [{utf8, <<"parent">>}]),
+    _ = erlfdb_directory:create_or_open(Db, Root, [{utf8, <<"parent">>}, {utf8, <<"child">>}]),
+    Part = erlfdb_directory:create(Db, Root, [{utf8, <<"part">>}], [{layer, <<"partition">>}]),
+    _ = erlfdb_directory:create_or_open(Db, Part, [{utf8, <<"pchild">>}]),
+
+    Cases = [
+        %% Equivalent spellings of the same single-component path.
+        {Root, <<"parent">>},
+        {Root, [<<"parent">>]},
+        {Root, [{utf8, <<"parent">>}]},
+        %% Nested path from the root.
+        {Root, [{utf8, <<"parent">>}, {utf8, <<"child">>}]},
+        %% Same target reached through a sub-node base instead of the root.
+        {Parent, [{utf8, <<"child">>}]},
+        %% Inside a partition, addressed via the partition handle.
+        {Part, [{utf8, <<"pchild">>}]}
+    ],
+
+    lists:foreach(
+        fun({Base, Path}) ->
+            Direct = erlfdb_directory:create_or_open(Db, Base, Path),
+            OnMiss = erlfdb_directory_cache:create_or_open(Table, Db, Base, Path),
+            OnHit = erlfdb_directory_cache:create_or_open(Table, Db, Base, Path),
+            ?assertEqual(Direct, OnMiss),
+            ?assertEqual(Direct, OnHit)
+        end,
+        Cases
+    ).
+
+%% Two different base nodes that share a root, opened with the *same* relative
+%% path, must not collide in the cache.
+distinct_base_nodes_no_collision(Config) ->
+    {Table, Root, Db} = setup(Config),
+    DirA = erlfdb_directory:create_or_open(Db, Root, [{utf8, <<"a">>}]),
+    DirB = erlfdb_directory:create_or_open(Db, Root, [{utf8, <<"b">>}]),
+    AX = erlfdb_directory_cache:create_or_open(Table, Db, DirA, [{utf8, <<"x">>}]),
+    BX = erlfdb_directory_cache:create_or_open(Table, Db, DirB, [{utf8, <<"x">>}]),
+    %% Distinct directories must have distinct ids and two distinct cache entries.
+    ?assertNotEqual(
+        erlfdb_directory:get_id(AX),
+        erlfdb_directory:get_id(BX)
+    ),
+    ?assertEqual(2, ets:info(Table, size)),
+    %% Each cached node must match the directory resolved from the absolute path.
+    Direct = erlfdb_directory:create_or_open(Db, Root, [{utf8, <<"a">>}, {utf8, <<"x">>}]),
+    ?assertEqual(erlfdb_directory:get_id(Direct), erlfdb_directory:get_id(AX)).
+
+%% Equivalent spellings of the same path resolve to a single cache entry.
+path_spelling_normalized(Config) ->
+    {Table, Root, Db} = setup(Config),
+    erlfdb_directory:create_or_open(Db, Root, [{utf8, <<"norm">>}]),
+    N1 = erlfdb_directory_cache:open(Table, Db, Root, <<"norm">>),
+    N2 = erlfdb_directory_cache:open(Table, Db, Root, [<<"norm">>]),
+    N3 = erlfdb_directory_cache:open(Table, Db, Root, [{utf8, <<"norm">>}]),
+    ?assertEqual(N1, N2),
+    ?assertEqual(N2, N3),
+    ?assertEqual(1, ets:info(Table, size)).
 
 invalidate(Config) ->
     {Table, Root, Db} = setup(Config),

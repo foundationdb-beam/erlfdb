@@ -349,8 +349,10 @@ purge(Table, Ttl) ->
 
 -spec path_key(erlfdb_directory:t(), erlfdb_directory:path()) ->
     {binary(), erlfdb_directory:path()}.
-path_key(Root, Path) ->
-    {erlfdb_directory:get_node_prefix(Root), Path}.
+path_key(Node, Path) ->
+    % See docs for `erlfdb_directory:adj_path/2` for key canonicalization details
+    {Root, AbsPath} = erlfdb_directory:adj_path(Node, Path),
+    {erlfdb_directory:get_node_prefix(Root), AbsPath}.
 
 -spec open_with_cache(
     ets:table(),

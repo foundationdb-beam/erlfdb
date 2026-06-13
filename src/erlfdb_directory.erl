@@ -54,6 +54,8 @@
     get_layer/1,
     get_subspace/1,
 
+    adj_path/2,
+
     subspace/2,
     key/1,
     pack/2,
@@ -917,6 +919,18 @@ check_same_partition(OldNode, NewParentNode) ->
         true -> ?ERLFDB_ERROR({move_error, partition_mismatch, OldRoot, NewRoot})
     end.
 
+-if(?DOCATTRS).
+-doc """
+Resolves `Node` and `PathIn` to a canonical `{Root, Path}` pair, where `Root` is
+the partition that actually owns `Node` and `Path` is the fully-normalized path
+of the target relative to that `Root`.
+
+`Path` is independent of how `PathIn` was expressed (binary, `{utf8, _}`, list,
+or tuple) and of which descendant of `Root` was supplied as `Node`: it is always
+the absolute path within the owning partition. This makes `{get_node_prefix(Root),
+Path}` a collision-free identity for a directory.
+""".
+-endif.
 -spec adj_path(t(), path()) -> {t(), [path_item()]}.
 adj_path(Node, PathIn) ->
     adj_path(get_root(Node), Node, PathIn).
