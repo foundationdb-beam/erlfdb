@@ -40,22 +40,20 @@ typedef struct _ErlFDBSt {
     ErlNifTid network_tid;
     ErlNifMutex *lock;
     ErlNifCond *cond;
+    fdb_error_t network_err;
 } ErlFDBSt;
 
 static void *erlfdb_network_thread(void *arg) {
     ErlFDBSt *st = (ErlFDBSt *)arg;
-    fdb_error_t *err = enif_alloc(sizeof(fdb_error_t));
 
     enif_mutex_lock(st->lock);
-
     st->lib_state = ErlFDB_NETWORK_STARTING;
-
     enif_cond_signal(st->cond);
     enif_mutex_unlock(st->lock);
 
-    *err = fdb_run_network();
+    st->network_err = fdb_run_network();
 
-    return (void *)err;
+    return NULL;
 }
 
 static void erlfdb_future_cb(FDBFuture *fdb_future, void *data) {
@@ -116,6 +114,10 @@ static ERL_NIF_TERM erlfdb_create_future(ErlNifEnv *env, ERL_NIF_TERM *tx_ref,
         fdb_future_destroy(future);
         return enif_make_badarg(env);
     }
+
+    // Init lock to NULL so that an early return invoking
+    // the dtor will skip freeing the lock
+    f->lock = NULL;
 
     f->future = future;
     f->ftype = ftype;
@@ -431,8 +433,6 @@ static void erlfdb_join(void *priv) {
     ErlFDBSt *st = (ErlFDBSt *)priv;
     ErlFDBLibState lib_state = ErlFDB_STATE_ERROR;
     fdb_error_t err;
-    void *tmp;
-    fdb_error_t *net_err;
     int nif_err;
 
     enif_mutex_lock(st->lock);
@@ -443,12 +443,10 @@ static void erlfdb_join(void *priv) {
         err = fdb_stop_network();
         assert(err == 0 && "Error disconnecting fdb client");
 
-        nif_err = enif_thread_join(st->network_tid, &tmp);
+        nif_err = enif_thread_join(st->network_tid, NULL);
         assert(nif_err == 0 && "Error joining network thread");
 
-        net_err = (fdb_error_t *)tmp;
-        assert(*net_err == 0 && "Error running network thread");
-        enif_free(tmp);
+        assert(st->network_err == 0 && "Error running network thread");
     }
 
     enif_mutex_destroy(st->lock);
@@ -463,21 +461,41 @@ static int erlfdb_load(ErlNifEnv *env, void **priv,
 
     ErlFDBSt *st = (ErlFDBSt *)enif_alloc(sizeof(ErlFDBSt));
 
+    if (st == NULL) {
+        return 1;
+    }
+
+    st->network_err = 0;
+
     erlfdb_init_atoms(env);
 
     if (!erlfdb_init_resources(env)) {
+        enif_free(st);
         return 1;
     }
 
 #if (ERL_NIF_MAJOR_VERSION > 2) ||                                             \
     (ERL_NIF_MAJOR_VERSION == 2 && ERL_NIF_MINOR_VERSION >= 17)
     if (0 != enif_set_option(env, ERL_NIF_OPT_ON_HALT, erlfdb_join)) {
+        enif_free(st);
         return 1;
     }
 #endif
 
     st->lock = enif_mutex_create("fdb:st_lock");
+
+    if (st->lock == NULL) {
+        enif_free(st);
+        return 1;
+    }
+
     st->cond = enif_cond_create("fdb:st_cond");
+
+    if (st->cond == NULL) {
+        enif_mutex_destroy(st->lock);
+        enif_free(st);
+        return 1;
+    }
 
     st->lib_state = ErlFDB_LOADED;
     *priv = st;
