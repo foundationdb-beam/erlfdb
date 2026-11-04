@@ -24,7 +24,8 @@ erlfdb_erlang_error(ErlNifEnv *env, fdb_error_t err) {
     return enif_raise_exception(env, tuple);
 }
 
-int erlfdb_inspect_binary(ErlNifEnv *env, ERL_NIF_TERM term, ErlNifBinary *bin) {
+int erlfdb_inspect_binary(ErlNifEnv *env, ERL_NIF_TERM term,
+                          ErlNifBinary *bin) {
     if (!enif_inspect_binary(env, term, bin)) {
         return 0;
     }
