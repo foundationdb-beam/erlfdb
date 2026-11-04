@@ -15,11 +15,21 @@
 #include "atoms.h"
 #include "util.h"
 
+#include <limits.h>
+
 ERL_NIF_TERM
 erlfdb_erlang_error(ErlNifEnv *env, fdb_error_t err) {
     ERL_NIF_TERM code = enif_make_int(env, err);
     ERL_NIF_TERM tuple = T2(env, ATOM_erlfdb_error, code);
     return enif_raise_exception(env, tuple);
+}
+
+int erlfdb_inspect_binary(ErlNifEnv *env, ERL_NIF_TERM term, ErlNifBinary *bin) {
+    if (!enif_inspect_binary(env, term, bin)) {
+        return 0;
+    }
+
+    return bin->size <= (size_t)INT_MAX;
 }
 
 int erlfdb_get_boolean(ERL_NIF_TERM term, fdb_bool_t *ret) {
@@ -50,7 +60,7 @@ int erlfdb_get_key_selector(ErlNifEnv *env, ERL_NIF_TERM selector,
         return 0;
     }
 
-    if (!enif_inspect_binary(env, tuple[0], bin)) {
+    if (!erlfdb_inspect_binary(env, tuple[0], bin)) {
         return 0;
     }
 
