@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.2 (2026-11-05)
+
+### Bug fixes
+
+ * (#87) Fix issue with NIF being given a >= 2GiB binary. In earlier versions, the libfdb_c library would call
+   abort() and SIGABRT the Erlang VM. Now, a badarg error is provided to the caller.
+
 ## v1.2.1 (2026-06-15)
 
 ### Bug fixes

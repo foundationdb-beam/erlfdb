@@ -40,22 +40,22 @@ typedef struct _ErlFDBSt {
     ErlNifTid network_tid;
     ErlNifMutex *lock;
     ErlNifCond *cond;
+    fdb_error_t network_err;
 } ErlFDBSt;
 
 static void *erlfdb_network_thread(void *arg) {
     ErlFDBSt *st = (ErlFDBSt *)arg;
-    fdb_error_t *err = enif_alloc(sizeof(fdb_error_t));
 
     enif_mutex_lock(st->lock);
-
     st->lib_state = ErlFDB_NETWORK_STARTING;
-
     enif_cond_signal(st->cond);
     enif_mutex_unlock(st->lock);
 
-    *err = fdb_run_network();
+    st->network_err = fdb_run_network();
 
-    return (void *)err;
+    // Thread result is reported via st->network_err.
+    // The thread's return value is unused.
+    return NULL;
 }
 
 static void erlfdb_future_cb(FDBFuture *fdb_future, void *data) {
@@ -116,6 +116,10 @@ static ERL_NIF_TERM erlfdb_create_future(ErlNifEnv *env, ERL_NIF_TERM *tx_ref,
         fdb_future_destroy(future);
         return enif_make_badarg(env);
     }
+
+    // Init lock to NULL so that an early return invoking
+    // the dtor will skip freeing the lock
+    f->lock = NULL;
 
     f->future = future;
     f->ftype = ftype;
@@ -431,8 +435,6 @@ static void erlfdb_join(void *priv) {
     ErlFDBSt *st = (ErlFDBSt *)priv;
     ErlFDBLibState lib_state = ErlFDB_STATE_ERROR;
     fdb_error_t err;
-    void *tmp;
-    fdb_error_t *net_err;
     int nif_err;
 
     enif_mutex_lock(st->lock);
@@ -443,12 +445,11 @@ static void erlfdb_join(void *priv) {
         err = fdb_stop_network();
         assert(err == 0 && "Error disconnecting fdb client");
 
-        nif_err = enif_thread_join(st->network_tid, &tmp);
+        // Thread result stored in st->network_err, so respp arg is unused.
+        nif_err = enif_thread_join(st->network_tid, NULL);
         assert(nif_err == 0 && "Error joining network thread");
 
-        net_err = (fdb_error_t *)tmp;
-        assert(*net_err == 0 && "Error running network thread");
-        enif_free(tmp);
+        assert(st->network_err == 0 && "Error running network thread");
     }
 
     enif_mutex_destroy(st->lock);
@@ -463,21 +464,41 @@ static int erlfdb_load(ErlNifEnv *env, void **priv,
 
     ErlFDBSt *st = (ErlFDBSt *)enif_alloc(sizeof(ErlFDBSt));
 
+    if (st == NULL) {
+        return 1;
+    }
+
+    st->network_err = 0;
+
     erlfdb_init_atoms(env);
 
     if (!erlfdb_init_resources(env)) {
+        enif_free(st);
         return 1;
     }
 
 #if (ERL_NIF_MAJOR_VERSION > 2) ||                                             \
     (ERL_NIF_MAJOR_VERSION == 2 && ERL_NIF_MINOR_VERSION >= 17)
     if (0 != enif_set_option(env, ERL_NIF_OPT_ON_HALT, erlfdb_join)) {
+        enif_free(st);
         return 1;
     }
 #endif
 
     st->lock = enif_mutex_create("fdb:st_lock");
+
+    if (st->lock == NULL) {
+        enif_free(st);
+        return 1;
+    }
+
     st->cond = enif_cond_create("fdb:st_cond");
+
+    if (st->cond == NULL) {
+        enif_mutex_destroy(st->lock);
+        enif_free(st);
+        return 1;
+    }
 
     st->lib_state = ErlFDB_LOADED;
     *priv = st;
@@ -636,7 +657,7 @@ static ERL_NIF_TERM erlfdb_network_set_option(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &value)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &value)) {
         return enif_make_badarg(env);
     }
 
@@ -855,7 +876,7 @@ static ERL_NIF_TERM erlfdb_create_database(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[0], &bin)) {
+    if (!erlfdb_inspect_binary(env, argv[0], &bin)) {
         return enif_make_badarg(env);
     }
 
@@ -906,7 +927,7 @@ static ERL_NIF_TERM erlfdb_database_open_tenant(ErlNifEnv *env, int argc,
     }
     d = (ErlFDBDatabase *)res;
 
-    if (!enif_inspect_binary(env, argv[1], &bin)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &bin)) {
         return enif_make_badarg(env);
     }
 
@@ -986,7 +1007,7 @@ static ERL_NIF_TERM erlfdb_database_set_option(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[2], &value)) {
+    if (!erlfdb_inspect_binary(env, argv[2], &value)) {
         return enif_make_badarg(env);
     }
 
@@ -1265,7 +1286,7 @@ static ERL_NIF_TERM erlfdb_transaction_set_option(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[2], &value)) {
+    if (!erlfdb_inspect_binary(env, argv[2], &value)) {
         return enif_make_badarg(env);
     }
 
@@ -1378,7 +1399,7 @@ static ERL_NIF_TERM erlfdb_transaction_get(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &key)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &key)) {
         return enif_make_badarg(env);
     }
 
@@ -1423,11 +1444,11 @@ erlfdb_transaction_get_estimated_range_size(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &skey)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &skey)) {
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[2], &ekey)) {
+    if (!erlfdb_inspect_binary(env, argv[2], &ekey)) {
         return enif_make_badarg(env);
     }
 
@@ -1513,7 +1534,7 @@ erlfdb_transaction_get_addresses_for_key(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &key)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &key)) {
         return enif_make_badarg(env);
     }
 
@@ -1657,11 +1678,11 @@ erlfdb_transaction_get_range_split_points(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &skey)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &skey)) {
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[2], &ekey)) {
+    if (!erlfdb_inspect_binary(env, argv[2], &ekey)) {
         return enif_make_badarg(env);
     }
 
@@ -1732,7 +1753,7 @@ erlfdb_transaction_get_mapped_range(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[3], &mapper)) {
+    if (!erlfdb_inspect_binary(env, argv[3], &mapper)) {
         return enif_make_badarg(env);
     }
 
@@ -1820,11 +1841,11 @@ static ERL_NIF_TERM erlfdb_transaction_set(ErlNifEnv *env, int argc,
         return enif_raise_exception(env, ATOM_writes_not_allowed);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &key)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &key)) {
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[2], &val)) {
+    if (!erlfdb_inspect_binary(env, argv[2], &val)) {
         return enif_make_badarg(env);
     }
 
@@ -1864,7 +1885,7 @@ static ERL_NIF_TERM erlfdb_transaction_clear(ErlNifEnv *env, int argc,
         return enif_raise_exception(env, ATOM_writes_not_allowed);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &key)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &key)) {
         return enif_make_badarg(env);
     }
 
@@ -1904,11 +1925,11 @@ static ERL_NIF_TERM erlfdb_transaction_clear_range(ErlNifEnv *env, int argc,
         return enif_raise_exception(env, ATOM_writes_not_allowed);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &skey)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &skey)) {
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[2], &ekey)) {
+    if (!erlfdb_inspect_binary(env, argv[2], &ekey)) {
         return enif_make_badarg(env);
     }
 
@@ -1950,11 +1971,11 @@ static ERL_NIF_TERM erlfdb_transaction_atomic_op(ErlNifEnv *env, int argc,
         return enif_raise_exception(env, ATOM_writes_not_allowed);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &key)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &key)) {
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[2], &param)) {
+    if (!erlfdb_inspect_binary(env, argv[2], &param)) {
         return enif_make_badarg(env);
     }
 
@@ -2136,7 +2157,7 @@ static ERL_NIF_TERM erlfdb_transaction_watch(ErlNifEnv *env, int argc,
         return enif_raise_exception(env, ATOM_writes_not_allowed);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &key)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &key)) {
         return enif_make_badarg(env);
     }
 
@@ -2284,11 +2305,11 @@ erlfdb_transaction_add_conflict_range(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[1], &skey)) {
+    if (!erlfdb_inspect_binary(env, argv[1], &skey)) {
         return enif_make_badarg(env);
     }
 
-    if (!enif_inspect_binary(env, argv[2], &ekey)) {
+    if (!erlfdb_inspect_binary(env, argv[2], &ekey)) {
         return enif_make_badarg(env);
     }
 

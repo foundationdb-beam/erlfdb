@@ -36,6 +36,7 @@
     open_all/1,
     transactional_db/1,
     main_thread_busyness/1,
+    large_binary_abort_protection/1,
     client_status/1
 ]).
 
@@ -51,7 +52,8 @@ all() ->
         open_all,
         transactional_db,
         main_thread_busyness,
-        {group, vsn_730}
+        {group, vsn_730},
+        large_binary_abort_protection
     ].
 
 groups() ->
@@ -147,3 +149,11 @@ client_status(Config) ->
     Db = erlfdb_test_util:get_db(Config),
     Status = erlfdb:wait(erlfdb:get_client_status(Db)),
     ?assert(is_binary(Status)).
+
+large_binary_abort_protection(Config) ->
+    Db = erlfdb_test_util:get_db(Config),
+    Size = 1 bsl 31,
+    Binary = <<0:Size/unit:8>>,
+    % In v1.2.1 and prior, libfdb calls abort() when given a binary of this size.
+    % Use assertError so a failure report never has to format the 2GiB key.
+    ?assertError(badarg, erlfdb:get(Db, Binary)).
