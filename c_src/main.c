@@ -53,6 +53,8 @@ static void *erlfdb_network_thread(void *arg) {
 
     st->network_err = fdb_run_network();
 
+    // Thread result is reported via st->network_err.
+    // The thread's return value is unused.
     return NULL;
 }
 
@@ -443,6 +445,7 @@ static void erlfdb_join(void *priv) {
         err = fdb_stop_network();
         assert(err == 0 && "Error disconnecting fdb client");
 
+        // Thread result stored in st->network_err, so respp arg is unused.
         nif_err = enif_thread_join(st->network_tid, NULL);
         assert(nif_err == 0 && "Error joining network thread");
 
