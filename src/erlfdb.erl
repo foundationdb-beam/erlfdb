@@ -81,13 +81,10 @@ iex> :erlfdb.transactional(db, fn tx ->
     open_all/1,
     open_all/2,
 
-    open_tenant/2,
-
     create_database/0,
     create_database/1,
 
     create_transaction/1,
-    tenant_create_transaction/1,
 
     transactional/2,
     snapshot/1,
@@ -229,8 +226,6 @@ iex> :erlfdb.transactional(db, fn tx ->
     open_option/0,
     result/0,
     snapshot/0,
-    tenant/0,
-    tenant_name/0,
     transaction/0,
     transaction_future_ready_message/0,
     transaction_option/0,
@@ -245,7 +240,6 @@ iex> :erlfdb.transactional(db, fn tx ->
 -define(IS_FUTURE, {erlfdb_future, _, _}).
 -define(IS_FOLD_FUTURE, {fold_future, _, _}).
 -define(IS_DB, {erlfdb_database, _}).
--define(IS_TENANT, {erlfdb_tenant, _}).
 -define(IS_TX, {erlfdb_transaction, _}).
 -define(IS_SS, {erlfdb_snapshot, _}).
 -define(GET_TX(SS), element(2, SS)).
@@ -301,8 +295,6 @@ iex> :erlfdb.transactional(db, fn tx ->
 -type mapped_kv() :: {kv(), {key(), key()}, list(kv())}.
 -type mapper() :: tuple().
 -type snapshot() :: {erlfdb_snapshot, transaction()}.
--type tenant() :: erlfdb_nif:tenant().
--type tenant_name() :: binary().
 -type transaction() :: erlfdb_nif:transaction().
 -type tx_object() :: database() | transaction() | snapshot().
 -type transaction_future_ready_message() :: {{reference(), reference()}, ready}.
@@ -425,17 +417,6 @@ open_all(ClusterFile, Options) ->
 
 -if(?DOCATTRS).
 -doc """
-Opens a handle to the [Tenant](https://apple.github.io/foundationdb/tenants.html).
-
-*C API function*: [`fdb_database_open_tenant`](https://apple.github.io/foundationdb/api-c.html#c.fdb_database_open_tenant)
-""".
--endif.
--spec open_tenant(database(), tenant_name()) -> tenant().
-open_tenant(?IS_DB = Db, TenantName) ->
-    erlfdb_nif:database_open_tenant(Db, TenantName).
-
--if(?DOCATTRS).
--doc """
 Creates a database object, which serves as a handle to the FoundationDB server, using the [default cluster file](https://apple.github.io/foundationdb/administration.html#default-cluster-file).
 
 *C API function*: [`fdb_create_database`](https://apple.github.io/foundationdb/api-c.html#c.fdb_create_database)
@@ -476,24 +457,6 @@ create_transaction(?IS_DB = Db) ->
 
 -if(?DOCATTRS).
 -doc """
-Creates a transaction from an open tenant.
-
-The caller is responsible for calling
-`commit/` when appropriate and implementing any retry behavior.
-
-*C API function*: [`fdb_tenant_create_transaction`](https://apple.github.io/foundationdb/api-c.html#c.fdb_tenant_create_transaction)
-
-> #### Tip {: .tip}
->
-> Use `transactional/2` instead.
-""".
--endif.
--spec tenant_create_transaction(tenant()) -> transaction().
-tenant_create_transaction(?IS_TENANT = Tenant) ->
-    erlfdb_nif:tenant_create_transaction(Tenant).
-
--if(?DOCATTRS).
--doc """
 Executes the provided 1-arity function in a transaction.
 
 You'll use the other erlfdb functions inside a transaction to safely achieve interesting
@@ -529,7 +492,7 @@ by default, the timeout is set to `infinity`.
 
 ## Arguments
 
-  * `Db` / `Tenant`: The context under which the transaction is created.
+  * `Db`: The context under which the transaction is created.
   * `UserFun`: 1-arity function to be executed with FDB transactional
     semantics. The transaction (`t:transaction/0`) is provided as the argument to the function.
 
@@ -540,17 +503,6 @@ Using a database as the transactional context:
 ```erlang
 1> Db = erlfdb:open().
 2> erlfdb:transactional(Db, fun(Tx) ->
-..     not_found = erlfdb:wait(erlfdb:get(Tx, <<"hello">>)),
-..     erlfdb:set(Tx, <<"hello">>, <<"world">>)
-.. end).
-```
-
-Using a tenant as the transactional context:
-
-```erlang
-1> Db = erlfdb:open().
-2> Tenant = erlfdb:open_tenant(Db, <<"some-org">>)
-2> erlfdb:transactional(Tenant, fun(Tx) ->
 ..     not_found = erlfdb:wait(erlfdb:get(Tx, <<"hello">>)),
 ..     erlfdb:set(Tx, <<"hello">>, <<"world">>)
 .. end).
@@ -574,14 +526,10 @@ Performing non-trivial logic inside a transaction:
 ```
 """.
 -endif.
--spec transactional(tx_object() | tenant(), function()) -> any().
+-spec transactional(tx_object(), function()) -> any().
 transactional(?IS_DB = Db, UserFun) when is_function(UserFun, 1) ->
     clear_erlfdb_error(),
     Tx = create_transaction(Db),
-    do_transaction(Tx, UserFun, 0);
-transactional(?IS_TENANT = Tenant, UserFun) when is_function(UserFun, 1) ->
-    clear_erlfdb_error(),
-    Tx = tenant_create_transaction(Tenant),
     do_transaction(Tx, UserFun, 0);
 transactional(?IS_TX = Tx, UserFun) when is_function(UserFun, 1) ->
     UserFun(Tx);
@@ -983,7 +931,7 @@ wait_for_all_interleaving(Tx, Futures, Options) ->
     % All are tagged with an index.
     FFs = lists:map(
         fun
-            ({?IS_FOLD_FUTURE = FF = #fold_future{st = St}, Idx}) ->
+            ({FF = #fold_future{st = St}, Idx}) ->
                 FF#fold_future{st = St#fold_st{idx = Idx}};
             ({Future, Idx}) ->
                 #fold_future{future = Future, st = #fold_st{from = Future, idx = Idx}}
@@ -1248,7 +1196,7 @@ Let's create our kvs:
 Now, we can retrieve the `<<"c">>` value in a single shot:
 
 ```erlang
-3> Result = erlfdb:transactional(Tenant, fun(Tx) ->
+3> Result = erlfdb:transactional(Db, fun(Tx) ->
 ..     erlfdb:get_mapped_range(
 ..         Tx,
 ..         <<"a">>,

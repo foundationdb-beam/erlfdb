@@ -40,13 +40,11 @@ The NIF wrapper around all FoundationDB C API function calls.
     future_get/1,
 
     create_database/1,
-    database_open_tenant/2,
     database_set_option/2,
     database_set_option/3,
     database_create_transaction/1,
     database_get_main_thread_busyness/1,
     database_get_client_status/1,
-    tenant_create_transaction/1,
 
     transaction_set_option/2,
     transaction_set_option/3,
@@ -95,7 +93,6 @@ The NIF wrapper around all FoundationDB C API function calls.
     future_result/0,
     key/0,
     key_selector/0,
-    tenant/0,
     transaction/0,
     transaction_option/0,
     value/0,
@@ -105,7 +102,6 @@ The NIF wrapper around all FoundationDB C API function calls.
 -type error() :: {erlfdb_error, Code :: integer()}.
 -type future() :: {erlfdb_future, reference(), reference()}.
 -type database() :: {erlfdb_database, reference()}.
--type tenant() :: {erlfdb_tenant, reference()}.
 -type transaction() :: {erlfdb_transaction, reference()}.
 
 -type option_value() :: integer() | binary().
@@ -278,22 +274,6 @@ create_database(ClusterFilePath) ->
         end,
     erlfdb_create_database(NifPath).
 
--spec database_open_tenant(database(), TenantName :: binary()) -> tenant().
-database_open_tenant(Database, <<>>) ->
-    database_open_tenant(Database, <<0>>);
-database_open_tenant({erlfdb_database, Database}, TenantName) ->
-    Size = size(TenantName) - 1,
-    % Make sure we pass a NULL-terminated string
-    % to FoundationDB
-    NifTenant =
-        case TenantName of
-            <<_:Size/binary, 0>> ->
-                TenantName;
-            _ ->
-                <<TenantName/binary, 0>>
-        end,
-    erlfdb_database_open_tenant(Database, NifTenant).
-
 -spec database_set_option(database(), Option :: database_option()) -> ok.
 database_set_option(Database, Option) ->
     database_set_option(Database, Option, <<>>).
@@ -318,10 +298,6 @@ database_get_main_thread_busyness({erlfdb_database, Db}) ->
 -spec database_get_client_status(database()) -> future().
 database_get_client_status({erlfdb_database, Db}) ->
     erlfdb_database_get_client_status(Db).
-
--spec tenant_create_transaction(tenant()) -> transaction().
-tenant_create_transaction({erlfdb_tenant, T}) ->
-    erlfdb_tenant_create_transaction(T).
 
 -spec transaction_set_option(transaction(), Option :: transaction_option()) -> ok.
 transaction_set_option(Transaction, Option) ->
@@ -683,12 +659,10 @@ erlfdb_future_get(_Future) -> ?NOT_LOADED.
 
 % Databases
 erlfdb_create_database(_ClusterFilePath) -> ?NOT_LOADED.
-erlfdb_database_open_tenant(_Database, _TenantName) -> ?NOT_LOADED.
 erlfdb_database_set_option(_Database, _DatabaseOption, _Value) -> ?NOT_LOADED.
 erlfdb_database_create_transaction(_Database) -> ?NOT_LOADED.
 erlfdb_database_get_main_thread_busyness(_Database) -> ?NOT_LOADED.
 erlfdb_database_get_client_status(_Database) -> ?NOT_LOADED.
-erlfdb_tenant_create_transaction(_Tenant) -> ?NOT_LOADED.
 
 % Transactions
 erlfdb_transaction_set_option(_Transaction, _TransactionOption, _Value) -> ?NOT_LOADED.

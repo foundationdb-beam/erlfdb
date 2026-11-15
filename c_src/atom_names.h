@@ -29,7 +29,6 @@ ATOM_MAP(not_found);
 ATOM_MAP(erlfdb_error);
 ATOM_MAP(erlfdb_future);
 ATOM_MAP(erlfdb_database);
-ATOM_MAP(erlfdb_tenant);
 ATOM_MAP(erlfdb_transaction);
 
 ATOM_MAP(invalid_future_type);

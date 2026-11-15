@@ -20,7 +20,6 @@
 
 extern ErlNifResourceType *ErlFDBFutureRes;
 extern ErlNifResourceType *ErlFDBDatabaseRes;
-extern ErlNifResourceType *ErlFDBTenantRes;
 extern ErlNifResourceType *ErlFDBTransactionRes;
 
 typedef enum _ErlFDBFutureType {
@@ -83,10 +82,6 @@ typedef struct _ErlFDBDatabase {
     FDBDatabase *database;
 } ErlFDBDatabase;
 
-typedef struct _ErlFDBTenant {
-    FDBTenant *tenant;
-} ErlFDBTenant;
-
 typedef struct _ErlFDBTransaction {
     FDBTransaction *transaction;
     ERL_NIF_TERM owner;
@@ -99,7 +94,6 @@ typedef struct _ErlFDBTransaction {
 int erlfdb_init_resources(ErlNifEnv *env);
 void erlfdb_future_dtor(ErlNifEnv *env, void *obj);
 void erlfdb_database_dtor(ErlNifEnv *env, void *obj);
-void erlfdb_tenant_dtor(ErlNifEnv *env, void *obj);
 void erlfdb_transaction_dtor(ErlNifEnv *env, void *obj);
 
 int erlfdb_transaction_is_owner(ErlNifEnv *env, ErlFDBTransaction *t);
