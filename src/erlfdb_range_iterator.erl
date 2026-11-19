@@ -121,7 +121,7 @@ handle_next(State = #state{}) ->
 handle_stop(_State = #state{future = undefined}) ->
     ok;
 handle_stop(_State = #state{future = Future}) ->
-    erlfdb:cancel(Future),
+    erlfdb:cancel(Future, [{flush, true}]),
     ok.
 
 -if(?DOCATTRS).
