@@ -24,7 +24,7 @@ jobs:
             eunit: true
             ct: true
           - otp: "29.1.2"
-            fdb: "8.0.0"
+            fdb: "8.0.1"
             eunit: true
             ct: true
             bindingtester: true
@@ -68,9 +68,9 @@ jobs:
         env:
           ERL_LIBS: _build/test/lib/erlfdb/
         run: |
-          curl -L "https://github.com/apple/foundationdb/archive/${{ env.FDB_VERSION }}.tar.gz" > foundation.tar.gz
-          tar -xf foundation.tar.gz
-          rm foundation.tar.gz
+          curl -L "https://github.com/apple/foundationdb/archive/${{ env.FDB_VERSION }}.tar.gz" > foundationdb.tar.gz
+          tar -xf foundationdb.tar.gz
+          rm foundationdb.tar.gz
           mv foundationdb-$FDB_VERSION foundationdb
           cd foundationdb
           sed "s:USER_SITE_PATH:$(python3 -m site --user-site):g" ../test/bindingtester/foundationdb.patch | patch -p1
@@ -84,12 +84,12 @@ jobs:
     strategy:
       matrix:
         include:
-          # A 7.x client cannot load the 8.0.0 libfdb_c as an external client:
-          # 8.0.0 removed blob granule functions that the 7.x loader requires
-          # (fdb_setup_network fails with error 2204).
+          # 8.0.1 or later is required: 8.0.0 lacks blob granule functions that
+          # the 7.x multi-version loader requires, so fdb_setup_network fails
+          # with error 2204 (apple/foundationdb#14239).
           - otp: "29.1.2"
-            fdb_old: "7.2.2"
-            fdb_new: "7.3.62"
+            fdb_old: "7.3.62"
+            fdb_new: "8.0.1"
     name: "linux / OTP ${{ matrix.otp }} / FDB ${{ matrix.fdb_old }} -> ${{ matrix.fdb_new }} (multiversion)"
     env:
       FDB_OLD: ${{ matrix.fdb_old }}
@@ -113,7 +113,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - fdb: "8.0.0"
+          - fdb: "8.0.1"
             eunit: true
             ct: true
     name: "macOS / FDB ${{ matrix.fdb }} (${{ matrix.eunit && 'eunit' || '' }}${{ matrix.ct && ' ct' || '' }})"
