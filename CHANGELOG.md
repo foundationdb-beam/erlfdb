@@ -6,6 +6,11 @@
 
 * Add support for FDB 8.0
 
+## Breaking changes
+
+* Remove Tenant support. Tenants were in experimental status and they were removed in FDB 8.0.
+  The Direcory Layer is an alternative for your consideration.
+
 ### CI
 
 * Update to OTP 27 and 29 (OTP 25 removed)

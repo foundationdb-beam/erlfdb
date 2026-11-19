@@ -54,7 +54,6 @@ jobs:
           wget https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-server_${FDB_VERSION}-1_amd64.deb
           sudo dpkg -i foundationdb-clients_${FDB_VERSION}-1_amd64.deb
           sudo dpkg -i foundationdb-server_${FDB_VERSION}-1_amd64.deb
-          fdbcli --exec 'configure tenant_mode=optional_experimental'
         if: ${{ matrix.dialyzer || matrix.eunit || matrix.ct || matrix.bindingtester }}
       - name: Run dialyzer
         run: rebar3 dialyzer
