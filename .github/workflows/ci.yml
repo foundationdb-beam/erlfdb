@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    # builds.hex.pm has no OTP 25 builds for ubuntu-26.04 (ubuntu-latest).
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         include:
