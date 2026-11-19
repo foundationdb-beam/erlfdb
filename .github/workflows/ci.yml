@@ -31,6 +31,10 @@ jobs:
             fdb: "7.3.62"
             eunit: true
             ct: true
+          - otp: "29.1.2"
+            fdb: "8.0.0"
+            eunit: true
+            ct: true
             bindingtester: true
             dialyzer: true
             fmt: true
@@ -42,7 +46,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
-          rebar3-version: "3.24.0"
+          rebar3-version: "3.28.0"
       - name: Run rebar3 fmt check for Erlang files
         run: ERLFDB_ASSERT_API_VERSION=0 rebar3 fmt --check
         if: ${{ matrix.fmt }}
@@ -89,9 +93,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - otp: "27.0.1"
-            fdb_old: "7.2.2"
-            fdb_new: "7.3.62"
+          - otp: "29.1.2"
+            fdb_old: "7.3.62"
+            fdb_new: "8.0.0"
     name: "linux / OTP ${{ matrix.otp }} / FDB ${{ matrix.fdb_old }} -> ${{ matrix.fdb_new }} (multiversion)"
     env:
       FDB_OLD: ${{ matrix.fdb_old }}
@@ -101,7 +105,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
-          rebar3-version: "3.24.0"
+          rebar3-version: "3.28.0"
       - name: Download FDB packages
         run: |
           wget https://github.com/apple/foundationdb/releases/download/${FDB_OLD}/foundationdb-clients_${FDB_OLD}-1_amd64.deb
@@ -115,7 +119,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - fdb: "7.3.62"
+          - fdb: "8.0.0"
             eunit: true
             ct: true
     name: "macOS / FDB ${{ matrix.fdb }} (${{ matrix.eunit && 'eunit' || '' }}${{ matrix.ct && ' ct' || '' }})"
