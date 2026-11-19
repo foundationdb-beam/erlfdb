@@ -160,7 +160,11 @@ The NIF wrapper around all FoundationDB C API function calls.
     % API version 630+
     | enable_run_loop_profiling
     | client_threads_per_version
-    | ignore_external_client_failures.
+    % API version 730+
+    | ignore_external_client_failures
+    % API version 800+
+    | trace_ip
+    | tls_disable_plaintext_connection.
 
 -type database_option() ::
     location_cache_size
@@ -195,7 +199,11 @@ The NIF wrapper around all FoundationDB C API function calls.
     | read_lock_aware
     | size_limit
     | allow_writes
-    | disallow_writes.
+    | disallow_writes
+    % API version 800+
+    | max_grv_queue_delay
+    | enable_replica_consistency_check
+    | consistency_check_required_replicas.
 
 -type streaming_mode() ::
     stream_want_all

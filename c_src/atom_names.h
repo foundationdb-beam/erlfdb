@@ -67,6 +67,8 @@ ATOM_MAP(enable_slow_task_profiling);
 ATOM_MAP(enable_run_loop_profiling);
 ATOM_MAP(client_threads_per_version);
 ATOM_MAP(ignore_external_client_failures);
+ATOM_MAP(trace_ip);
+ATOM_MAP(tls_disable_plaintext_connection);
 
 // Database Options
 ATOM_MAP(location_cache_size);
@@ -110,6 +112,9 @@ ATOM_MAP(include_port_in_address);
 ATOM_MAP(use_provisional_proxies);
 ATOM_MAP(report_conflicting_keys);
 ATOM_MAP(special_key_space_enable_writes);
+ATOM_MAP(max_grv_queue_delay);
+ATOM_MAP(enable_replica_consistency_check);
+ATOM_MAP(consistency_check_required_replicas);
 
 // Streaming mode
 ATOM_MAP(want_all);

@@ -653,6 +653,12 @@ static ERL_NIF_TERM erlfdb_network_set_option(ErlNifEnv *env, int argc,
         // and those checks are not present in the older versions
         return ATOM_ok;
 #endif
+#if FDB_API_VERSION >= 800
+    } else if (IS_ATOM(argv[0], trace_ip)) {
+        option = FDB_NET_OPTION_TRACE_IP;
+    } else if (IS_ATOM(argv[0], tls_disable_plaintext_connection)) {
+        option = FDB_NET_OPTION_TLS_DISABLE_PLAINTEXT_CONNECTION;
+#endif
     } else {
         return enif_make_badarg(env);
     }
@@ -1180,6 +1186,14 @@ static ERL_NIF_TERM erlfdb_transaction_set_option(ErlNifEnv *env, int argc,
 #if FDB_API_VERSION > 630
     } else if (IS_ATOM(argv[1], special_key_space_enable_writes)) {
         option = FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES;
+#endif
+#if FDB_API_VERSION >= 800
+    } else if (IS_ATOM(argv[1], max_grv_queue_delay)) {
+        option = FDB_TR_OPTION_MAX_GRV_QUEUE_DELAY;
+    } else if (IS_ATOM(argv[1], enable_replica_consistency_check)) {
+        option = FDB_TR_OPTION_ENABLE_REPLICA_CONSISTENCY_CHECK;
+    } else if (IS_ATOM(argv[1], consistency_check_required_replicas)) {
+        option = FDB_TR_OPTION_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
 #endif
     } else {
         return enif_make_badarg(env);
