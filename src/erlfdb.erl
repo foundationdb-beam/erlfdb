@@ -278,7 +278,8 @@ iex> :erlfdb.transactional(db, fn tx ->
     | {mapper, binary()}
     | {wait, true | false}.
 -type split_option() ::
-    {chunk_size, non_neg_integer()}.
+    {chunk_size, non_neg_integer()}
+    | {limit, non_neg_integer()}.
 -type future() :: erlfdb_nif:future().
 -type future_ready_message() :: transaction_future_ready_message() | watch_future_ready_message().
 -type get_versionstamp_option() ::
@@ -1143,6 +1144,11 @@ get_mapped_range(DbOrTx, StartKey, EndKey, Mapper, Options) ->
 Returns a list of keys that can split the given range into (roughly) equally sized chunks based on chunk_size.
 
 *C API function*: [`fdb_transaction_get_range_split_points`](https://apple.github.io/foundationdb/api-c.html#c.fdb_transaction_get_range_split_points)
+
+## Options
+
+  - `chunk_size`: Target bytes for each chunk of the resulting splits. Defaults to 10 MB
+  - `limit`: Limits the number of split keys in the reply. Requires API version >= 800.
 """.
 -endif.
 -spec get_range_split_points(tx_object(), key(), key(), [split_option()]) ->
@@ -1155,7 +1161,14 @@ get_range_split_points(?IS_DB = Db, StartKey, EndKey, Options) ->
 get_range_split_points(?IS_TX = Tx, StartKey, EndKey, Options) ->
     % 10M
     ChunkSize = erlfdb_util:get(Options, chunk_size, 10000000),
-    erlfdb_nif:transaction_get_range_split_points(Tx, StartKey, EndKey, ChunkSize);
+    case erlfdb_util:get(Options, limit, undefined) of
+        undefined ->
+            erlfdb_nif:transaction_get_range_split_points(Tx, StartKey, EndKey, ChunkSize);
+        Limit ->
+            erlfdb_nif:transaction_get_range_split_points_with_limit(
+                Tx, StartKey, EndKey, ChunkSize, Limit
+            )
+    end;
 get_range_split_points(?IS_SS = SS, StartKey, EndKey, Options) ->
     get_range_split_points(?GET_TX(SS), StartKey, EndKey, Options).
 

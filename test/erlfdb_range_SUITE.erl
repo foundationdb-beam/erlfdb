@@ -37,6 +37,7 @@
     fold_range/1,
     fold_range_future/1,
     get_range_split_points/1,
+    get_range_split_points_limit/1,
     get_mapped_range_minimal/1,
     get_mapped_range_continuation/1,
     fold_mapped_range_future/1
@@ -56,14 +57,16 @@ all() ->
         fold_range,
         fold_range_future,
         get_range_split_points,
-        {group, vsn_730}
+        {group, vsn_730},
+        {group, vsn_800}
     ].
 
 groups() ->
     [
         {vsn_730, [], [
             get_mapped_range_minimal, get_mapped_range_continuation, fold_mapped_range_future
-        ]}
+        ]},
+        {vsn_800, [], [get_range_split_points_limit]}
     ].
 
 init_per_suite(Config) ->
@@ -76,6 +79,11 @@ init_per_group(vsn_730, Config) ->
     case erlfdb_test_util:vsn_at_least(730) of
         true -> Config;
         false -> {skip, "requires FDB API version >= 730"}
+    end;
+init_per_group(vsn_800, Config) ->
+    case erlfdb_test_util:vsn_at_least(800) of
+        true -> Config;
+        false -> {skip, "requires FDB API version >= 800"}
     end;
 init_per_group(_Group, Config) ->
     Config.
@@ -279,3 +287,48 @@ fold_mapped_range_future(Config) ->
         erlfdb:fold_range_wait(Tx, FF, fun(Chunk, Acc) -> Acc ++ Chunk end, [])
     end),
     ?assertEqual(N, length(Got)).
+
+%%--------------------------------------------------------------------
+%% v800 group
+%%--------------------------------------------------------------------
+
+get_range_split_points_limit(Config) ->
+    Db = erlfdb_test_util:get_db(Config),
+    %% Split points come from the storage servers' byte sample. Values of
+    %% 100 KB are always sampled, so a chunk size of 100 KB gives about one
+    %% split point per key. 20 values are 2 MB, below the 10 MB transaction
+    %% limit.
+    Value = binary:copy(<<"x">>, 100000),
+    erlfdb:transactional(Db, fun(Tx) ->
+        [erlfdb:set(Tx, erlfdb_test_util:dir_key(Config, {I}), Value) || I <- lists:seq(1, 20)]
+    end),
+    {Start, End} = dir_start_end(Config),
+    ChunkSize = 100000,
+    Limit = 3,
+    {All, Limited, Unlimited} = erlfdb:transactional(Db, fun(Tx) ->
+        {
+            erlfdb:wait(erlfdb:get_range_split_points(Tx, Start, End, [{chunk_size, ChunkSize}])),
+            erlfdb:wait(
+                erlfdb:get_range_split_points(Tx, Start, End, [
+                    {chunk_size, ChunkSize}, {limit, Limit}
+                ])
+            ),
+            %% A negative limit means no limit.
+            erlfdb:wait(
+                erlfdb:get_range_split_points(Tx, Start, End, [
+                    {chunk_size, ChunkSize}, {limit, -1}
+                ])
+            )
+        }
+    end),
+    %% The test is only meaningful if the unlimited reply has more interior
+    %% split points than the limit.
+    ?assert(length(All) - 2 > Limit),
+    %% The reply has at most Limit interior split points, and always
+    %% includes both endpoints.
+    ?assert(length(Limited) - 2 =< Limit),
+    ?assertEqual(Start, hd(Limited)),
+    ?assertEqual(End, lists:last(Limited)),
+    %% The limited reply is the first page of the unlimited reply.
+    ?assertEqual(lists:sublist(All, Limit + 1), lists:sublist(Limited, Limit + 1)),
+    ?assertEqual(All, Unlimited).

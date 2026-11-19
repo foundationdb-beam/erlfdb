@@ -56,6 +56,7 @@ The NIF wrapper around all FoundationDB C API function calls.
     transaction_get_addresses_for_key/2,
     transaction_get_range/9,
     transaction_get_range_split_points/4,
+    transaction_get_range_split_points_with_limit/5,
     transaction_get_mapped_range/10,
     transaction_set/3,
     transaction_clear/2,
@@ -407,6 +408,28 @@ transaction_get_range_split_points(
         ChunkSize
     ).
 
+-spec transaction_get_range_split_points_with_limit(
+    transaction(),
+    StartKey :: binary(),
+    EndKey :: binary(),
+    ChunkSize :: non_neg_integer(),
+    Limit :: non_neg_integer()
+) -> future().
+transaction_get_range_split_points_with_limit(
+    {erlfdb_transaction, Tx},
+    StartKey,
+    EndKey,
+    ChunkSize,
+    Limit
+) ->
+    erlfdb_transaction_get_range_split_points_with_limit(
+        Tx,
+        StartKey,
+        EndKey,
+        ChunkSize,
+        Limit
+    ).
+
 -spec transaction_get_mapped_range(
     transaction(),
     StartKeySelector :: key_selector(),
@@ -697,6 +720,14 @@ erlfdb_transaction_get_range_split_points(
     _StartKey,
     _EndKey,
     _ChunkSize
+) ->
+    ?NOT_LOADED.
+erlfdb_transaction_get_range_split_points_with_limit(
+    _Transaction,
+    _StartKey,
+    _EndKey,
+    _ChunkSize,
+    _Limit
 ) ->
     ?NOT_LOADED.
 erlfdb_transaction_get_mapped_range(

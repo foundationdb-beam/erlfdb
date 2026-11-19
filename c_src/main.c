@@ -1611,6 +1611,73 @@ erlfdb_transaction_get_range_split_points(ErlNifEnv *env, int argc,
                                 ErlFDB_FT_KEY_ARRAY);
 }
 
+#if FDB_API_VERSION >= 800
+static ERL_NIF_TERM erlfdb_transaction_get_range_split_points_with_limit(
+    ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+    ErlFDBSt *st = (ErlFDBSt *)enif_priv_data(env);
+    ERL_NIF_TERM tx_ref;
+    ErlFDBTransaction *t;
+
+    ErlNifBinary skey;
+
+    ErlNifBinary ekey;
+
+    int chunk_size;
+    int limit;
+
+    FDBFuture *future;
+    void *res;
+
+    if (st->lib_state != ErlFDB_CONNECTED) {
+        return enif_make_badarg(env);
+    }
+
+    if (argc != 5) {
+        return enif_make_badarg(env);
+    }
+
+    tx_ref = argv[0];
+
+    if (!enif_get_resource(env, tx_ref, ErlFDBTransactionRes, &res)) {
+        return enif_make_badarg(env);
+    }
+    t = (ErlFDBTransaction *)res;
+
+    if (!erlfdb_transaction_is_owner(env, t)) {
+        return enif_make_badarg(env);
+    }
+
+    if (!erlfdb_inspect_binary(env, argv[1], &skey)) {
+        return enif_make_badarg(env);
+    }
+
+    if (!erlfdb_inspect_binary(env, argv[2], &ekey)) {
+        return enif_make_badarg(env);
+    }
+
+    if (!enif_get_int(env, argv[3], &chunk_size)) {
+        return enif_make_badarg(env);
+    }
+
+    if (!enif_get_int(env, argv[4], &limit)) {
+        return enif_make_badarg(env);
+    }
+
+    future = fdb_transaction_get_range_split_points_with_limit(
+        t->transaction, (uint8_t *)skey.data, skey.size, (uint8_t *)ekey.data,
+        ekey.size, chunk_size, limit);
+
+    return erlfdb_create_future(env, &tx_ref, NULL, future,
+                                ErlFDB_FT_KEY_ARRAY);
+}
+#else
+static ERL_NIF_TERM
+erlfdb_transaction_get_range_split_points_with_limit(ErlNifEnv *env, int argc,
+                                                     const ERL_NIF_TERM argv[]) {
+    return enif_make_badarg(env);
+}
+#endif
+
 #if FDB_API_VERSION >= 730
 static ERL_NIF_TERM
 erlfdb_transaction_get_mapped_range(ErlNifEnv *env, int argc,
@@ -2500,6 +2567,7 @@ static ErlNifFunc funcs[] = {
     NIF_FUNC(erlfdb_transaction_get_addresses_for_key, 2),
     NIF_FUNC(erlfdb_transaction_get_range, 9),
     NIF_FUNC(erlfdb_transaction_get_range_split_points, 4),
+    NIF_FUNC(erlfdb_transaction_get_range_split_points_with_limit, 5),
     NIF_FUNC(erlfdb_transaction_get_mapped_range, 10),
     NIF_FUNC(erlfdb_transaction_set, 3),
     NIF_FUNC(erlfdb_transaction_clear, 2),
