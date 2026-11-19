@@ -34,7 +34,6 @@
     get_range_startswith/1,
     get_range_target_bytes/1,
     get_range_streaming_modes/1,
-    get_range_wait_interleaving/1,
     fold_range/1,
     fold_range_future/1,
     get_range_split_points/1,
@@ -54,7 +53,6 @@ all() ->
         get_range_startswith,
         get_range_target_bytes,
         get_range_streaming_modes,
-        get_range_wait_interleaving,
         fold_range,
         fold_range_future,
         get_range_split_points,
@@ -182,15 +180,6 @@ get_range_streaming_modes(Config) ->
         end,
         Modes
     ).
-
-get_range_wait_interleaving(Config) ->
-    Db = erlfdb_test_util:get_db(Config),
-    KVs = insert_range(Db, Config, 10),
-    {Start, End} = dir_start_end(Config),
-    Got = erlfdb:transactional(Db, fun(Tx) ->
-        erlfdb:get_range(Tx, Start, End, [{wait, interleaving}, {chunk_size, 1}, {target_bytes, 1}])
-    end),
-    ?assertEqual(KVs, Got).
 
 fold_range(Config) ->
     Db = erlfdb_test_util:get_db(Config),

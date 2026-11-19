@@ -33,8 +33,8 @@
     wait_for_any/1,
     wait_for_any_watch/1,
     wait_for_all/1,
-    wait_for_all_interleaving/1,
-    wait_for_all_interleaving_mapped/1,
+    fold_range_wait/1,
+    fold_range_wait_mapped/1,
     cancel_future/1,
     cancel_future_flush/1,
     foregone_future_flush/1,
@@ -52,7 +52,7 @@ all() ->
         wait_for_any,
         wait_for_any_watch,
         wait_for_all,
-        wait_for_all_interleaving,
+        fold_range_wait,
         cancel_future,
         cancel_future_flush,
         foregone_future_flush,
@@ -62,7 +62,7 @@ all() ->
     ].
 
 groups() ->
-    [{vsn_730, [], [wait_for_all_interleaving_mapped]}].
+    [{vsn_730, [], [fold_range_wait_mapped]}].
 
 init_per_suite(Config) ->
     erlfdb_test_util:open_sandbox(Config).
@@ -156,7 +156,7 @@ wait_for_all(Config) ->
     Expected = [V || {_, V} <- KVs],
     ?assertEqual(Expected, Got).
 
-wait_for_all_interleaving(Config) ->
+fold_range_wait(Config) ->
     Db = erlfdb_test_util:get_db(Config),
     N = 50,
     KVs = [
@@ -167,15 +167,19 @@ wait_for_all_interleaving(Config) ->
         [erlfdb:set(Tx, K, V) || {K, V} <- KVs]
     end),
     {Start, End} = erlfdb_test_util:dir_range(Config),
-    [R1, R2, foobar] = erlfdb:transactional(Db, fun(Tx) ->
+    {Batches, R2} = erlfdb:transactional(Db, fun(Tx) ->
+        %% target_bytes=1 forces multiple pages for the range.
         F1 = erlfdb:fold_range_future(Tx, Start, End, [{target_bytes, 1}]),
         F2 = erlfdb:get(Tx, erlfdb_test_util:dir_key(Config, {1})),
-        erlfdb:wait_for_all_interleaving(Tx, [F1, F2, foobar])
+        %% fold_range_wait calls Fun(Chunk, Acc) once per page.
+        B = erlfdb:fold_range_wait(Tx, F1, fun(Chunk, Acc) -> [Chunk | Acc] end, []),
+        {lists:reverse(B), erlfdb:wait(F2)}
     end),
-    ?assertEqual(KVs, R1),
+    ?assert(length(Batches) > 1),
+    ?assertEqual(KVs, lists:append(Batches)),
     ?assertEqual(<<"v_1">>, R2).
 
-wait_for_all_interleaving_mapped(Config) ->
+fold_range_wait_mapped(Config) ->
     Db = erlfdb_test_util:get_db(Config),
     N = 10,
     Node = erlfdb_test_util:get_dir(Config),
@@ -193,9 +197,10 @@ wait_for_all_interleaving_mapped(Config) ->
     end),
     {Start, End} = erlfdb_directory:range(Node, {<<"a">>}),
     Mapper = {Prefix, <<"{V[0]}">>, <<"{...}">>},
-    [MappedRows] = erlfdb:transactional(Db, fun(Tx) ->
+    MappedRows = erlfdb:transactional(Db, fun(Tx) ->
         FF = erlfdb:fold_mapped_range_future(Tx, Start, End, Mapper),
-        erlfdb:wait_for_all_interleaving(Tx, [FF])
+        %% fold_range_wait calls Fun(Chunk, Acc) where Chunk is a list of mapped rows.
+        erlfdb:fold_range_wait(Tx, FF, fun(Chunk, Acc) -> Acc ++ Chunk end, [])
     end),
     ?assertEqual(N, length(MappedRows)).
 

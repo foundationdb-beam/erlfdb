@@ -5,11 +5,18 @@
 ### Enhancements
 
 * Add support for FDB 8.0
+  - Add `limit` option to `get_range_split_points`.
 
-## Breaking changes
+### Breaking changes
 
 * Remove Tenant support. Tenants were in experimental status and they were removed in FDB 8.0.
-  The Direcory Layer is an alternative for your consideration.
+  The Directory Layer is an alternative for your consideration.
+* Remove `wait_for_all_interleaving/*` and the `interleaving` wait option.
+  Instead, use `erlfdb_range_iterator` and `erlfdb_iterator:pipeline/1`.
+
+### New Deprecations
+
+* On `get_range/4`, the `{wait, false}` option is deprecated. See `erlfdb_range_iterator`.
 
 ### CI
 
