@@ -84,9 +84,12 @@ jobs:
     strategy:
       matrix:
         include:
+          # A 7.x client cannot load the 8.0.0 libfdb_c as an external client:
+          # 8.0.0 removed blob granule functions that the 7.x loader requires
+          # (fdb_setup_network fails with error 2204).
           - otp: "29.1.2"
-            fdb_old: "7.3.62"
-            fdb_new: "8.0.0"
+            fdb_old: "7.2.2"
+            fdb_new: "7.3.62"
     name: "linux / OTP ${{ matrix.otp }} / FDB ${{ matrix.fdb_old }} -> ${{ matrix.fdb_new }} (multiversion)"
     env:
       FDB_OLD: ${{ matrix.fdb_old }}
