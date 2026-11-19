@@ -1671,9 +1671,8 @@ static ERL_NIF_TERM erlfdb_transaction_get_range_split_points_with_limit(
                                 ErlFDB_FT_KEY_ARRAY);
 }
 #else
-static ERL_NIF_TERM
-erlfdb_transaction_get_range_split_points_with_limit(ErlNifEnv *env, int argc,
-                                                     const ERL_NIF_TERM argv[]) {
+static ERL_NIF_TERM erlfdb_transaction_get_range_split_points_with_limit(
+    ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     return enif_make_badarg(env);
 }
 #endif
