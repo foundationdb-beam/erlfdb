@@ -23,11 +23,11 @@ index 615d173a6a..25e6c8ea77 100644
      ),
 +    "erlang": Tester(
 +        "erlang",
-+        _absolute_path("./test/bindingtester/tester.es",
++        "./test/bindingtester/tester.es",
 +        2040,
 +        730,
 +        MAX_API_VERSION,
-+        directory_snapshot_ops_enabled=False,
++        types=ALL_TYPES,
 +    ),
  }
 diff --git a/bindings/python/tests/tester.py b/bindings/python/tests/tester.py
