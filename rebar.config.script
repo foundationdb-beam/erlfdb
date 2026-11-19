@@ -137,19 +137,9 @@ GetSupportedAssets = fun(Assets) ->
     ]
 end.
 
-% Gets the asset map for the latest non-AVX FDB Release on the current architecture
-GetLatestNonAVXAssets = fun() ->
-    % AVX releases have odd patch numbers, so we make sure we have the even one
-    % If you want the AVX release, please install it manually.
-    RVsn =
-        case GetLatestRelease() of
-            {ok, [Major, Minor, Patch]} when Patch rem 2 == 1 ->
-                {ok, [Major, Minor, Patch - 1]};
-            Res ->
-                Res
-        end,
-
-    case RVsn of
+% Gets the asset map for the latest FDB Release on the current architecture
+GetLatestAssets = fun() ->
+    case GetLatestRelease() of
         {ok, Vsn = [_, _, _]} ->
             Url = lists:flatten([FDBReleasesBaseUrl ++ "/tags/", io_lib:format("~p.~p.~p", Vsn)]),
             case GetJson(Url) of
@@ -204,7 +194,7 @@ case CompileAPIVersion of
         Message =
             case application:ensure_all_started(ssl) of
                 {ok, _} ->
-                    case GetLatestNonAVXAssets() of
+                    case GetLatestAssets() of
                         {ok, AssetsMap} ->
                             LogAssetsMap(AssetsMap),
                             undefined;
