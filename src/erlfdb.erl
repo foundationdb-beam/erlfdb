@@ -252,7 +252,6 @@ iex> :erlfdb.transactional(db, fn tx ->
     iteration,
     snapshot,
     reverse,
-    from,
     idx
 }).
 
@@ -2134,14 +2133,7 @@ folding_get_future(?IS_TX = Tx, #fold_st{mapper = undefined} = St) ->
         Snapshot,
         Reverse
     ),
-
-    NewSt =
-        case St of
-            #fold_st{from = undefined} -> St#fold_st{from = Future};
-            _ -> St
-        end,
-
-    #fold_future{st = NewSt, future = Future};
+    #fold_future{st = St, future = Future};
 folding_get_future(?IS_TX = Tx, #fold_st{} = St) ->
     #fold_st{
         start_key = StartKey,
@@ -2167,14 +2159,7 @@ folding_get_future(?IS_TX = Tx, #fold_st{} = St) ->
         Snapshot,
         Reverse
     ),
-
-    NewSt =
-        case St of
-            #fold_st{from = undefined} -> St#fold_st{from = Future};
-            _ -> St
-        end,
-
-    #fold_future{st = NewSt, future = Future}.
+    #fold_future{st = St, future = Future}.
 
 -spec options_to_fold_st(key(), key(), [fold_option()]) -> #fold_st{}.
 options_to_fold_st(StartKey, EndKey, Options) ->
@@ -2193,8 +2178,7 @@ options_to_fold_st(StartKey, EndKey, Options) ->
         streaming_mode = erlfdb_util:get(Options, streaming_mode, want_all),
         iteration = erlfdb_util:get(Options, iteration, 1),
         snapshot = erlfdb_util:get(Options, snapshot, false),
-        reverse = Reverse,
-        from = undefined
+        reverse = Reverse
     }.
 
 -spec flush_future_message(future()) -> ok.
