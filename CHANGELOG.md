@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.0.0 (TBD)
+
+### Enhancements
+
+* Add support for FDB 8.0
+
+### CI
+
+* Update to OTP 27 and 29 (OTP 25 removed)
+* Update bindingtester for FDB 8.0
+
 ## v1.2.3 (2026-11-19)
 
 ### Bug fixes
