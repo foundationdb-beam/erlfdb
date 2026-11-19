@@ -1120,7 +1120,9 @@ erlfdb_database_get_client_status(ErlNifEnv *env, int argc,
     }
     d = (ErlFDBDatabase *)res;
     future = fdb_database_get_client_status(d->database);
-    return erlfdb_create_future(env, NULL, NULL, future, ErlFDB_FT_VALUE);
+    // The future holds a plain string, read with fdb_future_get_key. Reading
+    // it with fdb_future_get_value inspects a nonexistent "present" flag.
+    return erlfdb_create_future(env, NULL, NULL, future, ErlFDB_FT_KEY);
 #else
     return enif_make_badarg(env);
 #endif
