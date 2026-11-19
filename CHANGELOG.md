@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.3 (2026-11-19)
+
+### Bug fixes
+
+ * (#91) Read get_client_status as a Key instead of a Value
+
 ## v1.2.2 (2026-11-05)
 
 ### Bug fixes
