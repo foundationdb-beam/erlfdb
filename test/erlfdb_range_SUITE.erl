@@ -305,9 +305,12 @@ get_range_split_points_limit(Config) ->
     {Start, End} = dir_start_end(Config),
     ChunkSize = 100000,
     Limit = 3,
-    {All, Limited, Unlimited} = erlfdb:transactional(Db, fun(Tx) ->
+    All = wait_for_stable_split_points(Db, Start, End, ChunkSize, Limit + 1),
+    %% The test is only meaningful if the unlimited reply has more interior
+    %% split points than the limit.
+    ?assert(length(All) - 2 > Limit),
+    {Limited, Unlimited} = erlfdb:transactional(Db, fun(Tx) ->
         {
-            erlfdb:wait(erlfdb:get_range_split_points(Tx, Start, End, [{chunk_size, ChunkSize}])),
             erlfdb:wait(
                 erlfdb:get_range_split_points(Tx, Start, End, [
                     {chunk_size, ChunkSize}, {limit, Limit}
@@ -321,9 +324,6 @@ get_range_split_points_limit(Config) ->
             )
         }
     end),
-    %% The test is only meaningful if the unlimited reply has more interior
-    %% split points than the limit.
-    ?assert(length(All) - 2 > Limit),
     %% The reply has at most Limit interior split points, and always
     %% includes both endpoints.
     ?assert(length(Limited) - 2 =< Limit),
@@ -332,3 +332,28 @@ get_range_split_points_limit(Config) ->
     %% The limited reply is the first page of the unlimited reply.
     ?assertEqual(lists:sublist(All, Limit + 1), lists:sublist(Limited, Limit + 1)),
     ?assertEqual(All, Unlimited).
+
+%% A split point request carries no read version. The storage server answers
+%% from its byte sample, which it updates as it applies mutations from the
+%% transaction logs, so replies sent right after a commit can still change.
+%% Polls until two consecutive replies are equal and have at least
+%% MinInterior interior split points, and returns that reply. Polls at most
+%% 50 times at 100 ms intervals.
+wait_for_stable_split_points(Db, Start, End, ChunkSize, MinInterior) ->
+    wait_for_stable_split_points(Db, Start, End, ChunkSize, MinInterior, undefined, 50).
+
+wait_for_stable_split_points(Db, Start, End, ChunkSize, MinInterior, Previous, Attempts) ->
+    Keys = erlfdb:transactional(Db, fun(Tx) ->
+        erlfdb:wait(erlfdb:get_range_split_points(Tx, Start, End, [{chunk_size, ChunkSize}]))
+    end),
+    if
+        Keys =:= Previous andalso length(Keys) - 2 >= MinInterior ->
+            Keys;
+        Attempts > 1 ->
+            timer:sleep(100),
+            wait_for_stable_split_points(
+                Db, Start, End, ChunkSize, MinInterior, Keys, Attempts - 1
+            );
+        true ->
+            ct:fail({split_points_not_ready, length(Keys) - 2, MinInterior})
+    end.
