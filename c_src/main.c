@@ -653,6 +653,12 @@ static ERL_NIF_TERM erlfdb_network_set_option(ErlNifEnv *env, int argc,
         // and those checks are not present in the older versions
         return ATOM_ok;
 #endif
+#if FDB_API_VERSION >= 800
+    } else if (IS_ATOM(argv[0], trace_ip)) {
+        option = FDB_NET_OPTION_TRACE_IP;
+    } else if (IS_ATOM(argv[0], tls_disable_plaintext_connection)) {
+        option = FDB_NET_OPTION_TLS_DISABLE_PLAINTEXT_CONNECTION;
+#endif
     } else {
         return enif_make_badarg(env);
     }
@@ -903,58 +909,6 @@ static ERL_NIF_TERM erlfdb_create_database(ErlNifEnv *env, int argc,
     return T2(env, ATOM_erlfdb_database, ret);
 }
 
-static ERL_NIF_TERM erlfdb_database_open_tenant(ErlNifEnv *env, int argc,
-                                                const ERL_NIF_TERM argv[]) {
-    ErlFDBSt *st = (ErlFDBSt *)enif_priv_data(env);
-    ErlNifBinary bin;
-    ErlFDBDatabase *d;
-    ErlFDBTenant *ten;
-    FDBTenant *tenant;
-    fdb_error_t err;
-    ERL_NIF_TERM ret;
-    void *res;
-
-    if (st->lib_state != ErlFDB_CONNECTED) {
-        return enif_make_badarg(env);
-    }
-
-    if (argc != 2) {
-        return enif_make_badarg(env);
-    }
-
-    if (!enif_get_resource(env, argv[0], ErlFDBDatabaseRes, &res)) {
-        return enif_make_badarg(env);
-    }
-    d = (ErlFDBDatabase *)res;
-
-    if (!erlfdb_inspect_binary(env, argv[1], &bin)) {
-        return enif_make_badarg(env);
-    }
-
-    if (bin.size < 1 || bin.data[bin.size - 1] != 0) {
-        return enif_make_badarg(env);
-    }
-
-    err = fdb_database_open_tenant(d->database, (const unsigned char *)bin.data,
-                                   bin.size - 1, &tenant);
-    if (err != 0) {
-        return erlfdb_erlang_error(env, err);
-    }
-
-    ten = enif_alloc_resource(ErlFDBTenantRes, sizeof(ErlFDBTenant));
-    if (ten == NULL) {
-        fdb_tenant_destroy(tenant);
-        return enif_make_badarg(env);
-    }
-
-    ten->tenant = tenant;
-
-    ret = enif_make_resource(env, ten);
-    enif_release_resource(ten);
-
-    return T2(env, ATOM_erlfdb_tenant, ret);
-}
-
 static ERL_NIF_TERM erlfdb_database_set_option(ErlNifEnv *env, int argc,
                                                const ERL_NIF_TERM argv[]) {
     ErlFDBSt *st = (ErlFDBSt *)enif_priv_data(env);
@@ -1128,57 +1082,6 @@ erlfdb_database_get_client_status(ErlNifEnv *env, int argc,
 #endif
 }
 
-static ERL_NIF_TERM
-erlfdb_tenant_create_transaction(ErlNifEnv *env, int argc,
-                                 const ERL_NIF_TERM argv[]) {
-    ErlFDBSt *st = (ErlFDBSt *)enif_priv_data(env);
-    ErlFDBTenant *ten;
-    ErlFDBTransaction *t;
-    FDBTransaction *transaction;
-    ErlNifPid pid;
-    ERL_NIF_TERM ret;
-    void *res;
-    fdb_error_t err;
-
-    if (st->lib_state != ErlFDB_CONNECTED) {
-        return enif_make_badarg(env);
-    }
-
-    if (argc != 1) {
-        return enif_make_badarg(env);
-    }
-
-    if (!enif_get_resource(env, argv[0], ErlFDBTenantRes, &res)) {
-        return enif_make_badarg(env);
-    }
-    ten = (ErlFDBTenant *)res;
-
-    err = fdb_tenant_create_transaction(ten->tenant, &transaction);
-    if (err != 0) {
-        return erlfdb_erlang_error(env, err);
-    }
-
-    t = enif_alloc_resource(ErlFDBTransactionRes, sizeof(ErlFDBTransaction));
-    if (t == NULL) {
-        fdb_transaction_destroy(transaction);
-        return enif_make_badarg(env);
-    }
-
-    t->transaction = transaction;
-
-    enif_self(env, &pid);
-    t->owner = enif_make_pid(env, &pid);
-
-    t->txid = 0;
-    t->read_only = true;
-    t->writes_allowed = true;
-    t->has_watches = false;
-
-    ret = enif_make_resource(env, t);
-    enif_release_resource(t);
-    return T2(env, ATOM_erlfdb_transaction, ret);
-}
-
 static ERL_NIF_TERM erlfdb_transaction_set_option(ErlNifEnv *env, int argc,
                                                   const ERL_NIF_TERM argv[]) {
     ErlFDBSt *st = (ErlFDBSt *)enif_priv_data(env);
@@ -1283,6 +1186,14 @@ static ERL_NIF_TERM erlfdb_transaction_set_option(ErlNifEnv *env, int argc,
 #if FDB_API_VERSION > 630
     } else if (IS_ATOM(argv[1], special_key_space_enable_writes)) {
         option = FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES;
+#endif
+#if FDB_API_VERSION >= 800
+    } else if (IS_ATOM(argv[1], max_grv_queue_delay)) {
+        option = FDB_TR_OPTION_MAX_GRV_QUEUE_DELAY;
+    } else if (IS_ATOM(argv[1], enable_replica_consistency_check)) {
+        option = FDB_TR_OPTION_ENABLE_REPLICA_CONSISTENCY_CHECK;
+    } else if (IS_ATOM(argv[1], consistency_check_required_replicas)) {
+        option = FDB_TR_OPTION_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
 #endif
     } else {
         return enif_make_badarg(env);
@@ -1699,6 +1610,72 @@ erlfdb_transaction_get_range_split_points(ErlNifEnv *env, int argc,
     return erlfdb_create_future(env, &tx_ref, NULL, future,
                                 ErlFDB_FT_KEY_ARRAY);
 }
+
+#if FDB_API_VERSION >= 800
+static ERL_NIF_TERM erlfdb_transaction_get_range_split_points_with_limit(
+    ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+    ErlFDBSt *st = (ErlFDBSt *)enif_priv_data(env);
+    ERL_NIF_TERM tx_ref;
+    ErlFDBTransaction *t;
+
+    ErlNifBinary skey;
+
+    ErlNifBinary ekey;
+
+    int chunk_size;
+    int limit;
+
+    FDBFuture *future;
+    void *res;
+
+    if (st->lib_state != ErlFDB_CONNECTED) {
+        return enif_make_badarg(env);
+    }
+
+    if (argc != 5) {
+        return enif_make_badarg(env);
+    }
+
+    tx_ref = argv[0];
+
+    if (!enif_get_resource(env, tx_ref, ErlFDBTransactionRes, &res)) {
+        return enif_make_badarg(env);
+    }
+    t = (ErlFDBTransaction *)res;
+
+    if (!erlfdb_transaction_is_owner(env, t)) {
+        return enif_make_badarg(env);
+    }
+
+    if (!erlfdb_inspect_binary(env, argv[1], &skey)) {
+        return enif_make_badarg(env);
+    }
+
+    if (!erlfdb_inspect_binary(env, argv[2], &ekey)) {
+        return enif_make_badarg(env);
+    }
+
+    if (!enif_get_int(env, argv[3], &chunk_size)) {
+        return enif_make_badarg(env);
+    }
+
+    if (!enif_get_int(env, argv[4], &limit)) {
+        return enif_make_badarg(env);
+    }
+
+    future = fdb_transaction_get_range_split_points_with_limit(
+        t->transaction, (uint8_t *)skey.data, skey.size, (uint8_t *)ekey.data,
+        ekey.size, chunk_size, limit);
+
+    return erlfdb_create_future(env, &tx_ref, NULL, future,
+                                ErlFDB_FT_KEY_ARRAY);
+}
+#else
+static ERL_NIF_TERM erlfdb_transaction_get_range_split_points_with_limit(
+    ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+    return enif_make_badarg(env);
+}
+#endif
 
 #if FDB_API_VERSION >= 730
 static ERL_NIF_TERM
@@ -2577,11 +2554,9 @@ static ErlNifFunc funcs[] = {
 
     NIF_FUNC(erlfdb_create_database, 1),
     NIF_FUNC(erlfdb_database_set_option, 3),
-    NIF_FUNC(erlfdb_database_open_tenant, 2),
     NIF_FUNC(erlfdb_database_create_transaction, 1),
     NIF_FUNC(erlfdb_database_get_main_thread_busyness, 1),
     NIF_FUNC(erlfdb_database_get_client_status, 1),
-    NIF_FUNC(erlfdb_tenant_create_transaction, 1),
 
     NIF_FUNC(erlfdb_transaction_set_option, 3),
     NIF_FUNC(erlfdb_transaction_set_read_version, 2),
@@ -2591,6 +2566,7 @@ static ErlNifFunc funcs[] = {
     NIF_FUNC(erlfdb_transaction_get_addresses_for_key, 2),
     NIF_FUNC(erlfdb_transaction_get_range, 9),
     NIF_FUNC(erlfdb_transaction_get_range_split_points, 4),
+    NIF_FUNC(erlfdb_transaction_get_range_split_points_with_limit, 5),
     NIF_FUNC(erlfdb_transaction_get_mapped_range, 10),
     NIF_FUNC(erlfdb_transaction_set, 3),
     NIF_FUNC(erlfdb_transaction_clear, 2),

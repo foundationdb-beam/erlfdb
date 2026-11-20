@@ -23,6 +23,7 @@ FDB_OLD_MAJOR="${FDB_OLD%%.*}"
 FDB_OLD_MINOR="${FDB_OLD#*.}"; FDB_OLD_MINOR="${FDB_OLD_MINOR%%.*}"
 COMPILE_API_VERSION="${FDB_OLD_MAJOR}${FDB_OLD_MINOR}0"
 PORT=4500
+MACHINE_ID="erlfdbmvtest"
 TEST_DIR="/tmp/fdb-upgrade-test"
 DATA_DIR="${TEST_DIR}/data"
 LOG_DIR="${TEST_DIR}/logs"
@@ -69,11 +70,17 @@ echo "=== Step 5: Start fdbserver ${FDB_OLD} ==="
 mkdir -p "${DATA_DIR}" "${LOG_DIR}"
 echo "erlfdbmvtest:erlfdbmvtest@127.0.0.1:${PORT}" > "${CLUSTER_FILE}"
 
+# Without --machine-id, fdbserver reads its machine ID from POSIX shared
+# memory. The fdbserver started by the package in Step 1 creates that segment,
+# and fdbserver 8.0.1 fails to read the segment that 7.3.62 writes: it exits
+# with "Could not locate shared memory - 'machineId'" (see
+# apple/foundationdb#1074). The CT harness in erlfdb_util also passes -i.
 /usr/sbin/fdbserver \
     -p "127.0.0.1:${PORT}" \
     -C "${CLUSTER_FILE}" \
     -d "${DATA_DIR}" \
-    -L "${LOG_DIR}" &
+    -L "${LOG_DIR}" \
+    --machine-id "${MACHINE_ID}" &
 FDB_PID=$!
 echo "fdbserver ${FDB_OLD} started (PID ${FDB_PID})"
 sleep 3
@@ -83,7 +90,7 @@ echo "=== Step 6: Initialize database ==="
 sleep 2
 
 echo "=== Step 7: Pre-upgrade verification ==="
-escript test/multiversion/verify_fdb.escript "${CLUSTER_FILE}" pre_upgrade "${MV_DIR}" "${COMPILE_API_VERSION}"
+timeout 120 escript test/multiversion/verify_fdb.escript "${CLUSTER_FILE}" pre_upgrade "${MV_DIR}" "${COMPILE_API_VERSION}"
 
 echo "=== Step 8: Stop fdbserver ${FDB_OLD} ==="
 kill "${FDB_PID}"
@@ -96,13 +103,19 @@ echo "=== Step 9: Start fdbserver ${FDB_NEW} ==="
     -p "127.0.0.1:${PORT}" \
     -C "${CLUSTER_FILE}" \
     -d "${DATA_DIR}" \
-    -L "${LOG_DIR}" &
+    -L "${LOG_DIR}" \
+    --machine-id "${MACHINE_ID}" &
 FDB_PID=$!
 echo "fdbserver ${FDB_NEW} started (PID ${FDB_PID})"
 sleep 5
+if ! kill -0 "${FDB_PID}" 2>/dev/null; then
+    echo "ERROR: fdbserver ${FDB_NEW} exited during startup"
+    exit 1
+fi
 
 echo "=== Step 10: Post-upgrade verification ==="
-escript test/multiversion/verify_fdb.escript "${CLUSTER_FILE}" post_upgrade "${MV_DIR}" "${COMPILE_API_VERSION}"
+# erlfdb retries forever when no server is reachable; bound the wait.
+timeout 120 escript test/multiversion/verify_fdb.escript "${CLUSTER_FILE}" post_upgrade "${MV_DIR}" "${COMPILE_API_VERSION}"
 
 echo ""
 echo "=== Multi-version upgrade test PASSED ==="

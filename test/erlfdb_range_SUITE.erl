@@ -34,10 +34,10 @@
     get_range_startswith/1,
     get_range_target_bytes/1,
     get_range_streaming_modes/1,
-    get_range_wait_interleaving/1,
     fold_range/1,
     fold_range_future/1,
     get_range_split_points/1,
+    get_range_split_points_limit/1,
     get_mapped_range_minimal/1,
     get_mapped_range_continuation/1,
     fold_mapped_range_future/1
@@ -54,18 +54,19 @@ all() ->
         get_range_startswith,
         get_range_target_bytes,
         get_range_streaming_modes,
-        get_range_wait_interleaving,
         fold_range,
         fold_range_future,
         get_range_split_points,
-        {group, vsn_730}
+        {group, vsn_730},
+        {group, vsn_800}
     ].
 
 groups() ->
     [
         {vsn_730, [], [
             get_mapped_range_minimal, get_mapped_range_continuation, fold_mapped_range_future
-        ]}
+        ]},
+        {vsn_800, [], [get_range_split_points_limit]}
     ].
 
 init_per_suite(Config) ->
@@ -78,6 +79,11 @@ init_per_group(vsn_730, Config) ->
     case erlfdb_test_util:vsn_at_least(730) of
         true -> Config;
         false -> {skip, "requires FDB API version >= 730"}
+    end;
+init_per_group(vsn_800, Config) ->
+    case erlfdb_test_util:vsn_at_least(800) of
+        true -> Config;
+        false -> {skip, "requires FDB API version >= 800"}
     end;
 init_per_group(_Group, Config) ->
     Config.
@@ -183,15 +189,6 @@ get_range_streaming_modes(Config) ->
         Modes
     ).
 
-get_range_wait_interleaving(Config) ->
-    Db = erlfdb_test_util:get_db(Config),
-    KVs = insert_range(Db, Config, 10),
-    {Start, End} = dir_start_end(Config),
-    Got = erlfdb:transactional(Db, fun(Tx) ->
-        erlfdb:get_range(Tx, Start, End, [{wait, interleaving}, {chunk_size, 1}, {target_bytes, 1}])
-    end),
-    ?assertEqual(KVs, Got).
-
 fold_range(Config) ->
     Db = erlfdb_test_util:get_db(Config),
     KVs = insert_range(Db, Config, 5),
@@ -290,3 +287,73 @@ fold_mapped_range_future(Config) ->
         erlfdb:fold_range_wait(Tx, FF, fun(Chunk, Acc) -> Acc ++ Chunk end, [])
     end),
     ?assertEqual(N, length(Got)).
+
+%%--------------------------------------------------------------------
+%% v800 group
+%%--------------------------------------------------------------------
+
+get_range_split_points_limit(Config) ->
+    Db = erlfdb_test_util:get_db(Config),
+    %% Split points come from the storage servers' byte sample. Values of
+    %% 100 KB are always sampled, so a chunk size of 100 KB gives about one
+    %% split point per key. 20 values are 2 MB, below the 10 MB transaction
+    %% limit.
+    Value = binary:copy(<<"x">>, 100000),
+    erlfdb:transactional(Db, fun(Tx) ->
+        [erlfdb:set(Tx, erlfdb_test_util:dir_key(Config, {I}), Value) || I <- lists:seq(1, 20)]
+    end),
+    {Start, End} = dir_start_end(Config),
+    ChunkSize = 100000,
+    Limit = 3,
+    All = wait_for_stable_split_points(Db, Start, End, ChunkSize, Limit + 1),
+    %% The test is only meaningful if the unlimited reply has more interior
+    %% split points than the limit.
+    ?assert(length(All) - 2 > Limit),
+    {Limited, Unlimited} = erlfdb:transactional(Db, fun(Tx) ->
+        {
+            erlfdb:wait(
+                erlfdb:get_range_split_points(Tx, Start, End, [
+                    {chunk_size, ChunkSize}, {limit, Limit}
+                ])
+            ),
+            %% A negative limit means no limit.
+            erlfdb:wait(
+                erlfdb:get_range_split_points(Tx, Start, End, [
+                    {chunk_size, ChunkSize}, {limit, -1}
+                ])
+            )
+        }
+    end),
+    %% The reply has at most Limit interior split points, and always
+    %% includes both endpoints.
+    ?assert(length(Limited) - 2 =< Limit),
+    ?assertEqual(Start, hd(Limited)),
+    ?assertEqual(End, lists:last(Limited)),
+    %% The limited reply is the first page of the unlimited reply.
+    ?assertEqual(lists:sublist(All, Limit + 1), lists:sublist(Limited, Limit + 1)),
+    ?assertEqual(All, Unlimited).
+
+%% A split point request carries no read version. The storage server answers
+%% from its byte sample, which it updates as it applies mutations from the
+%% transaction logs, so replies sent right after a commit can still change.
+%% Polls until two consecutive replies are equal and have at least
+%% MinInterior interior split points, and returns that reply. Polls at most
+%% 50 times at 100 ms intervals.
+wait_for_stable_split_points(Db, Start, End, ChunkSize, MinInterior) ->
+    wait_for_stable_split_points(Db, Start, End, ChunkSize, MinInterior, undefined, 50).
+
+wait_for_stable_split_points(Db, Start, End, ChunkSize, MinInterior, Previous, Attempts) ->
+    Keys = erlfdb:transactional(Db, fun(Tx) ->
+        erlfdb:wait(erlfdb:get_range_split_points(Tx, Start, End, [{chunk_size, ChunkSize}]))
+    end),
+    if
+        Keys =:= Previous andalso length(Keys) - 2 >= MinInterior ->
+            Keys;
+        Attempts > 1 ->
+            timer:sleep(100),
+            wait_for_stable_split_points(
+                Db, Start, End, ChunkSize, MinInterior, Keys, Attempts - 1
+            );
+        true ->
+            ct:fail({split_points_not_ready, length(Keys) - 2, MinInterior})
+    end.

@@ -7,10 +7,6 @@
 -moduledoc """
 An iterator interface over GetRange and GetMappedRange.
 
-The iterator is an alternative implmentation to `erlfdb:get_range/4` and
-`erlfdb:wait_for_all_interleaving/3`. The database mechanics are equivalent,
-but the iterator allows you to control when each wait actually happens.
-
 Remember that FoundationDB transaction execution time is limited to 5 seconds,
 so you must take care not to delay your iteration.
 
@@ -21,6 +17,46 @@ To use the iterator,
 2. `erlfdb_iterator.next/1`: Waits for the result of the GetRange request.
    Then issues another GetRange request to the database server.
 3. `erlfdb_iterator.stop/1`: Cancels the active future, if one exists.
+
+## Example
+
+Reads all key-value pairs between `<<"user/0">>` and `<<"user/1">>`.
+`erlfdb_iterator:run/1` returns a list of pages, and each page is a list of
+key-value pairs.
+
+```erlang
+1> Db = erlfdb:open().
+2> erlfdb:transactional(Db, fun(Tx) ->
+..     Iterator = erlfdb_range_iterator:start(Tx, <<"user/0">>, <<"user/1">>),
+..     {Pages, Iterator1} = erlfdb_iterator:run(Iterator),
+..     ok = erlfdb_iterator:stop(Iterator1),
+..     lists:append(Pages)
+.. end).
+```
+
+Counts the same key-value pairs one page at a time. Each call to
+`erlfdb_iterator:next/1` waits for one page and requests the next page, so
+each page can be processed before the next wait.
+
+```erlang
+1> Db = erlfdb:open().
+2> erlfdb:transactional(Db, fun(Tx) ->
+..     Count = fun
+..         Count(It, N) ->
+..             case erlfdb_iterator:next(It) of
+..                 {cont, Pages, It1} ->
+..                     Count(It1, N + length(lists:append(Pages)));
+..                 {halt, Pages, It1} ->
+..                     ok = erlfdb_iterator:stop(It1),
+..                     N + length(lists:append(Pages));
+..                 {halt, It1} ->
+..                     ok = erlfdb_iterator:stop(It1),
+..                     N
+..             end
+..     end,
+..     Count(erlfdb_range_iterator:start(Tx, <<"user/0">>, <<"user/1">>), 0)
+.. end).
+```
 """.
 -endif.
 
@@ -85,7 +121,7 @@ handle_next(State = #state{}) ->
 handle_stop(_State = #state{future = undefined}) ->
     ok;
 handle_stop(_State = #state{future = Future}) ->
-    erlfdb:cancel(Future),
+    erlfdb:cancel(Future, [{flush, true}]),
     ok.
 
 -if(?DOCATTRS).

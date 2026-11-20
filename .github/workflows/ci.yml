@@ -15,20 +15,16 @@ jobs:
     strategy:
       matrix:
         include:
-          - otp: "25"
-            fdb: "7.2.2"
-            eunit: true
-            ct: true
-          - otp: "25"
-            fdb: "7.3.62"
-            eunit: true
-            ct: true
           - otp: "27.0.1"
             fdb: "7.2.2"
             eunit: true
             ct: true
           - otp: "27.0.1"
             fdb: "7.3.62"
+            eunit: true
+            ct: true
+          - otp: "29.1.2"
+            fdb: "8.0.1"
             eunit: true
             ct: true
             bindingtester: true
@@ -42,7 +38,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
-          rebar3-version: "3.24.0"
+          rebar3-version: "3.28.0"
       - name: Run rebar3 fmt check for Erlang files
         run: ERLFDB_ASSERT_API_VERSION=0 rebar3 fmt --check
         if: ${{ matrix.fmt }}
@@ -58,7 +54,6 @@ jobs:
           wget https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-server_${FDB_VERSION}-1_amd64.deb
           sudo dpkg -i foundationdb-clients_${FDB_VERSION}-1_amd64.deb
           sudo dpkg -i foundationdb-server_${FDB_VERSION}-1_amd64.deb
-          fdbcli --exec 'configure tenant_mode=optional_experimental'
         if: ${{ matrix.dialyzer || matrix.eunit || matrix.ct || matrix.bindingtester }}
       - name: Run dialyzer
         run: rebar3 dialyzer
@@ -73,9 +68,9 @@ jobs:
         env:
           ERL_LIBS: _build/test/lib/erlfdb/
         run: |
-          curl -L "https://github.com/apple/foundationdb/archive/${{ env.FDB_VERSION }}.tar.gz" > foundation.tar.gz
-          tar -xf foundation.tar.gz
-          rm foundation.tar.gz
+          curl -L "https://github.com/apple/foundationdb/archive/${{ env.FDB_VERSION }}.tar.gz" > foundationdb.tar.gz
+          tar -xf foundationdb.tar.gz
+          rm foundationdb.tar.gz
           mv foundationdb-$FDB_VERSION foundationdb
           cd foundationdb
           sed "s:USER_SITE_PATH:$(python3 -m site --user-site):g" ../test/bindingtester/foundationdb.patch | patch -p1
@@ -84,14 +79,57 @@ jobs:
           pip3 show foundationdb
           ./test/bindingtester/loop.sh
         if: ${{ matrix.bindingtester }}
+  sanitizers:
+    runs-on: ubuntu-24.04
+    name: "linux / OTP 29.1.2 / FDB 8.0.1 (ct with ASan + UBSan)"
+    env:
+      FDB_VERSION: "8.0.1"
+      # rebar.config.script appends to CFLAGS and LDFLAGS, so these reach the
+      # port compiler. -fno-sanitize-recover makes UBSan findings fail the run.
+      # -fno-sanitize=alignment matches FoundationDB's own UBSan build: arrays
+      # such as FDBKeyValue come from FDB arenas that are not always aligned.
+      CFLAGS: "-fsanitize=address,undefined -fno-sanitize=alignment -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+      LDFLAGS: "-fsanitize=address,undefined"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29.1.2"
+          rebar3-version: "3.28.0"
+      - name: Install FoundationDB
+        run: |
+          wget https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-clients_${FDB_VERSION}-1_amd64.deb
+          wget https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-server_${FDB_VERSION}-1_amd64.deb
+          sudo dpkg -i foundationdb-clients_${FDB_VERSION}-1_amd64.deb
+          sudo dpkg -i foundationdb-server_${FDB_VERSION}-1_amd64.deb
+      - name: Build NIF with sanitizers
+        run: rebar3 as test compile
+      - name: Common Test with sanitizers
+        # The BEAM is not built with ASan, so the ASan runtime must be
+        # preloaded. Tests use the packaged FDB service (test_cluster_file
+        # system_default), so no fdbserver or fdbcli starts under the
+        # preloaded runtime. +Mea min makes erts allocators use malloc, so
+        # ASan also checks memory from enif_alloc. detect_leaks=0 because
+        # the BEAM and libfdb_c keep memory until exit.
+        run: |
+          LIBASAN="$(gcc -print-file-name=libasan.so)"
+          test -f "${LIBASAN}"
+          export LD_PRELOAD="${LIBASAN}"
+          export ASAN_OPTIONS="detect_leaks=0:halt_on_error=1"
+          export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
+          export ERL_FLAGS="+Mea min -erlfdb test_cluster_file system_default"
+          rebar3 ct
   multiversion:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - otp: "27.0.1"
-            fdb_old: "7.2.2"
-            fdb_new: "7.3.62"
+          # 8.0.1 or later is required: 8.0.0 lacks blob granule functions that
+          # the 7.x multi-version loader requires, so fdb_setup_network fails
+          # with error 2204 (apple/foundationdb#14239).
+          - otp: "29.1.2"
+            fdb_old: "7.3.62"
+            fdb_new: "8.0.1"
     name: "linux / OTP ${{ matrix.otp }} / FDB ${{ matrix.fdb_old }} -> ${{ matrix.fdb_new }} (multiversion)"
     env:
       FDB_OLD: ${{ matrix.fdb_old }}
@@ -101,7 +139,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
-          rebar3-version: "3.24.0"
+          rebar3-version: "3.28.0"
       - name: Download FDB packages
         run: |
           wget https://github.com/apple/foundationdb/releases/download/${FDB_OLD}/foundationdb-clients_${FDB_OLD}-1_amd64.deb
@@ -115,7 +153,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - fdb: "7.3.62"
+          - fdb: "8.0.1"
             eunit: true
             ct: true
     name: "macOS / FDB ${{ matrix.fdb }} (${{ matrix.eunit && 'eunit' || '' }}${{ matrix.ct && ' ct' || '' }})"

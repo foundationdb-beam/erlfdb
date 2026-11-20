@@ -81,13 +81,10 @@ iex> :erlfdb.transactional(db, fn tx ->
     open_all/1,
     open_all/2,
 
-    open_tenant/2,
-
     create_database/0,
     create_database/1,
 
     create_transaction/1,
-    tenant_create_transaction/1,
 
     transactional/2,
     snapshot/1,
@@ -113,9 +110,6 @@ iex> :erlfdb.transactional(db, fn tx ->
     wait_for_any/2,
     wait_for_all/1,
     wait_for_all/2,
-
-    wait_for_all_interleaving/2,
-    wait_for_all_interleaving/3,
 
     % Data retrieval
     get/2,
@@ -229,8 +223,6 @@ iex> :erlfdb.transactional(db, fn tx ->
     open_option/0,
     result/0,
     snapshot/0,
-    tenant/0,
-    tenant_name/0,
     transaction/0,
     transaction_future_ready_message/0,
     transaction_option/0,
@@ -245,7 +237,6 @@ iex> :erlfdb.transactional(db, fn tx ->
 -define(IS_FUTURE, {erlfdb_future, _, _}).
 -define(IS_FOLD_FUTURE, {fold_future, _, _}).
 -define(IS_DB, {erlfdb_database, _}).
--define(IS_TENANT, {erlfdb_tenant, _}).
 -define(IS_TX, {erlfdb_transaction, _}).
 -define(IS_SS, {erlfdb_snapshot, _}).
 -define(GET_TX(SS), element(2, SS)).
@@ -261,7 +252,6 @@ iex> :erlfdb.transactional(db, fn tx ->
     iteration,
     snapshot,
     reverse,
-    from,
     idx
 }).
 
@@ -286,9 +276,10 @@ iex> :erlfdb.transactional(db, fn tx ->
     | {iteration, pos_integer()}
     | {snapshot, boolean()}
     | {mapper, binary()}
-    | {wait, true | false | interleaving}.
+    | {wait, true | false}.
 -type split_option() ::
-    {chunk_size, non_neg_integer()}.
+    {chunk_size, non_neg_integer()}
+    | {limit, non_neg_integer()}.
 -type future() :: erlfdb_nif:future().
 -type future_ready_message() :: transaction_future_ready_message() | watch_future_ready_message().
 -type get_versionstamp_option() ::
@@ -301,8 +292,6 @@ iex> :erlfdb.transactional(db, fn tx ->
 -type mapped_kv() :: {kv(), {key(), key()}, list(kv())}.
 -type mapper() :: tuple().
 -type snapshot() :: {erlfdb_snapshot, transaction()}.
--type tenant() :: erlfdb_nif:tenant().
--type tenant_name() :: binary().
 -type transaction() :: erlfdb_nif:transaction().
 -type tx_object() :: database() | transaction() | snapshot().
 -type transaction_future_ready_message() :: {{reference(), reference()}, ready}.
@@ -425,17 +414,6 @@ open_all(ClusterFile, Options) ->
 
 -if(?DOCATTRS).
 -doc """
-Opens a handle to the [Tenant](https://apple.github.io/foundationdb/tenants.html).
-
-*C API function*: [`fdb_database_open_tenant`](https://apple.github.io/foundationdb/api-c.html#c.fdb_database_open_tenant)
-""".
--endif.
--spec open_tenant(database(), tenant_name()) -> tenant().
-open_tenant(?IS_DB = Db, TenantName) ->
-    erlfdb_nif:database_open_tenant(Db, TenantName).
-
--if(?DOCATTRS).
--doc """
 Creates a database object, which serves as a handle to the FoundationDB server, using the [default cluster file](https://apple.github.io/foundationdb/administration.html#default-cluster-file).
 
 *C API function*: [`fdb_create_database`](https://apple.github.io/foundationdb/api-c.html#c.fdb_create_database)
@@ -476,24 +454,6 @@ create_transaction(?IS_DB = Db) ->
 
 -if(?DOCATTRS).
 -doc """
-Creates a transaction from an open tenant.
-
-The caller is responsible for calling
-`commit/` when appropriate and implementing any retry behavior.
-
-*C API function*: [`fdb_tenant_create_transaction`](https://apple.github.io/foundationdb/api-c.html#c.fdb_tenant_create_transaction)
-
-> #### Tip {: .tip}
->
-> Use `transactional/2` instead.
-""".
--endif.
--spec tenant_create_transaction(tenant()) -> transaction().
-tenant_create_transaction(?IS_TENANT = Tenant) ->
-    erlfdb_nif:tenant_create_transaction(Tenant).
-
--if(?DOCATTRS).
--doc """
 Executes the provided 1-arity function in a transaction.
 
 You'll use the other erlfdb functions inside a transaction to safely achieve interesting
@@ -529,7 +489,7 @@ by default, the timeout is set to `infinity`.
 
 ## Arguments
 
-  * `Db` / `Tenant`: The context under which the transaction is created.
+  * `Db`: The context under which the transaction is created.
   * `UserFun`: 1-arity function to be executed with FDB transactional
     semantics. The transaction (`t:transaction/0`) is provided as the argument to the function.
 
@@ -540,17 +500,6 @@ Using a database as the transactional context:
 ```erlang
 1> Db = erlfdb:open().
 2> erlfdb:transactional(Db, fun(Tx) ->
-..     not_found = erlfdb:wait(erlfdb:get(Tx, <<"hello">>)),
-..     erlfdb:set(Tx, <<"hello">>, <<"world">>)
-.. end).
-```
-
-Using a tenant as the transactional context:
-
-```erlang
-1> Db = erlfdb:open().
-2> Tenant = erlfdb:open_tenant(Db, <<"some-org">>)
-2> erlfdb:transactional(Tenant, fun(Tx) ->
 ..     not_found = erlfdb:wait(erlfdb:get(Tx, <<"hello">>)),
 ..     erlfdb:set(Tx, <<"hello">>, <<"world">>)
 .. end).
@@ -574,14 +523,10 @@ Performing non-trivial logic inside a transaction:
 ```
 """.
 -endif.
--spec transactional(tx_object() | tenant(), function()) -> any().
+-spec transactional(tx_object(), function()) -> any().
 transactional(?IS_DB = Db, UserFun) when is_function(UserFun, 1) ->
     clear_erlfdb_error(),
     Tx = create_transaction(Db),
-    do_transaction(Tx, UserFun, 0);
-transactional(?IS_TENANT = Tenant, UserFun) when is_function(UserFun, 1) ->
-    clear_erlfdb_error(),
-    Tx = tenant_create_transaction(Tenant),
     do_transaction(Tx, UserFun, 0);
 transactional(?IS_TX = Tx, UserFun) when is_function(UserFun, 1) ->
     UserFun(Tx);
@@ -926,85 +871,6 @@ wait_for_all(Futures, Options) ->
 
 -if(?DOCATTRS).
 -doc """
-Equivalent to `wait_for_all_interleaving(Tx, Futures, [])`.
-""".
--endif.
--spec wait_for_all_interleaving(transaction() | snapshot(), [fold_future() | future()]) ->
-    list().
-wait_for_all_interleaving(Tx, Futures) ->
-    wait_for_all_interleaving(Tx, Futures, []).
-
--if(?DOCATTRS).
--doc """
-Experimental. Waits for all futures and returns all results. The order of the results
-is guaranteed to match the order of the futures. Uses an interleaving approach,
-which is described below.
-
-A future of type `t:fold_future/0` may require multiple round trips to the database
-server. When provided more than one, the requests to the database
-are pipelined so that the server can optimize retrieval of keys. In this interleaving
-approach, the client sends all known requests to the server as quickly as possible.
-
-This is an experimental optimization of `wait_for_all/1`, and
-is functionally equivalent.
-
-## Examples
-
-Imagine a large set of users stored with prefix `<<"user/">>` and a large set of blog
-posts stored with prefix `<<"post/">>`. We can retrieve all users and posts
-efficiently with `wait_for_all_interleaving/2`:
-
-```erlang
-1> Db = erlfdb:open().
-2> erlfdb:transactional(Db, fun(Tx) ->
-..     UsersF = erlfdb:get_range_startswith(Tx, <<"user/">>, [{wait, false}])),
-..     PostsF = erlfdb:get_range_startswith(Tx, <<"post/">>, [{wait, false}])),
-..     erlfdb:wait_for_all_interleaving(Tx, [UsersF, PostsF])
-.. end).
-```
-""".
--endif.
--spec wait_for_all_interleaving(transaction() | snapshot(), [fold_future() | future()], [
-    wait_option()
-]) ->
-    list().
-wait_for_all_interleaving(Tx, Futures, Options) ->
-    % Our fold function uses the indices in the fold_st to accumulate results into the tuple accumulator.
-    % The 'get_range's will accumulate the list results, and 'get's will be singular values.
-    Fun = fun
-        ({X, Idx}, AccTuple) when is_list(X) ->
-            setelement(Idx, AccTuple, [X | element(Idx, AccTuple)]);
-        ({X, Idx}, AccTuple) ->
-            setelement(Idx, AccTuple, X)
-    end,
-    Acc = list_to_tuple(lists:duplicate(length(Futures), [])),
-
-    % 'fold_st's are created where they don't already exist (e.g. from a 'get').
-    % All are tagged with an index.
-    FFs = lists:map(
-        fun
-            ({?IS_FOLD_FUTURE = FF = #fold_future{st = St}, Idx}) ->
-                FF#fold_future{st = St#fold_st{idx = Idx}};
-            ({Future, Idx}) ->
-                #fold_future{future = Future, st = #fold_st{from = Future, idx = Idx}}
-        end,
-        lists:zip(Futures, lists:seq(1, length(Futures)))
-    ),
-
-    Result = wait_and_apply(
-        Tx, FFs, Fun, Acc, lists:keystore(with_index, 1, Options, {with_index, true})
-    ),
-
-    lists:map(
-        fun
-            (R) when is_list(R) -> lists:flatten(lists:reverse(R));
-            (R) -> R
-        end,
-        tuple_to_list(Result)
-    ).
-
--if(?DOCATTRS).
--doc """
 Gets a value from the database.
 
 When used inside a `transactional/2`, the return is a `t:future/0`.
@@ -1117,9 +983,7 @@ Gets a range of key-value pairs from the database.
 A `wait` option can be provided with the following effect:
 
 - When `true`, the result is waited upon and returned.
-- When `false`, a `t:fold_future/0` is returned, and the result can be retrieved with `wait_for_all_interleaving/2`.
-- Experimental: When `interleaving`, `get_range_split_points/4` is used to divide the range and the futures are waited upon with `wait_for_all_interleaving/2`.
-  The flattened result is returned.
+- When `false`, a `t:fold_future/0` is returned, and the result can be retrieved with `fold_range_wait/4`. This option is deprecated. Use `m:erlfdb_range_iterator` instead.
 
 Default is `true`.
 
@@ -1128,12 +992,25 @@ Default is `true`.
 Gets all key-value pairs that are between keys `<<"user/0">>` and `<<"user/1">>`. No key with prefix `<<"user/1">>` will be
 returned. (left-inclusive, right-exclusive)
 
+**Using `{wait, true}`:**
+
+```erlang
+1> Db = erlfdb:open().
+2> erlfdb:transactional(Db, fun(Tx) ->
+..     erlfdb:get_range(Tx, <<"user/0">>, <<"user/1">>, [{wait, true}])
+.. end).
+```
+
+**Using `{wait, false}`:**
+
+Deprecated. See `m:erlfdb_range_iterator`.
+
 ```erlang
 1> Db = erlfdb:open().
 2> erlfdb:transactional(Db, fun(Tx) ->
 ..     Future = erlfdb:get_range(Tx, <<"user/0">>, <<"user/1">>, [{wait, false}]),
-..     [Result] = erlfdb:wait_for_all_interleaving(Tx, [Future]),
-..     Result
+..     Batches = erlfdb:fold_range_wait(Tx, Future, fun(Rows, Acc) -> [Rows | Acc] end, []),
+..     lists:append(lists:reverse(Batches))
 .. end).
 ```
 """.
@@ -1151,18 +1028,7 @@ get_range(?IS_TX = Tx, StartKey, EndKey, Options) ->
             Chunks = folding_get_range_and_wait(Tx, StartKey, EndKey, Fun, [], Options),
             lists:flatten(lists:reverse(Chunks));
         false ->
-            fold_range_future(Tx, StartKey, EndKey, Options);
-        interleaving ->
-            SplitPoints = erlfdb:wait(
-                get_range_split_points(
-                    Tx, StartKey, EndKey, Options
-                )
-            ),
-            Ranges = erlfdb_key:list_to_ranges(SplitPoints),
-
-            Futures = [fold_range_future(Tx, SK, EK, Options) || {SK, EK} <- Ranges],
-            Result = wait_for_all_interleaving(Tx, Futures),
-            lists:flatten(Result)
+            fold_range_future(Tx, StartKey, EndKey, Options)
     end;
 get_range(?IS_SS = SS, StartKey, EndKey, Options) ->
     get_range(?GET_TX(SS), StartKey, EndKey, [{snapshot, true} | Options]).
@@ -1248,7 +1114,7 @@ Let's create our kvs:
 Now, we can retrieve the `<<"c">>` value in a single shot:
 
 ```erlang
-3> Result = erlfdb:transactional(Tenant, fun(Tx) ->
+3> Result = erlfdb:transactional(Db, fun(Tx) ->
 ..     erlfdb:get_mapped_range(
 ..         Tx,
 ..         <<"a">>,
@@ -1278,6 +1144,11 @@ get_mapped_range(DbOrTx, StartKey, EndKey, Mapper, Options) ->
 Returns a list of keys that can split the given range into (roughly) equally sized chunks based on chunk_size.
 
 *C API function*: [`fdb_transaction_get_range_split_points`](https://apple.github.io/foundationdb/api-c.html#c.fdb_transaction_get_range_split_points)
+
+## Options
+
+  - `chunk_size`: Target bytes for each chunk of the resulting splits. Defaults to 10 MB
+  - `limit`: Limits the number of split keys in the reply. Requires API version >= 800.
 """.
 -endif.
 -spec get_range_split_points(tx_object(), key(), key(), [split_option()]) ->
@@ -1290,7 +1161,14 @@ get_range_split_points(?IS_DB = Db, StartKey, EndKey, Options) ->
 get_range_split_points(?IS_TX = Tx, StartKey, EndKey, Options) ->
     % 10M
     ChunkSize = erlfdb_util:get(Options, chunk_size, 10000000),
-    erlfdb_nif:transaction_get_range_split_points(Tx, StartKey, EndKey, ChunkSize);
+    case erlfdb_util:get(Options, limit, undefined) of
+        undefined ->
+            erlfdb_nif:transaction_get_range_split_points(Tx, StartKey, EndKey, ChunkSize);
+        Limit ->
+            erlfdb_nif:transaction_get_range_split_points_with_limit(
+                Tx, StartKey, EndKey, ChunkSize, Limit
+            )
+    end;
 get_range_split_points(?IS_SS = SS, StartKey, EndKey, Options) ->
     get_range_split_points(?GET_TX(SS), StartKey, EndKey, Options).
 
@@ -1306,10 +1184,6 @@ fold_range(DbOrTx, StartKey, EndKey, Fun, Acc) ->
 -if(?DOCATTRS).
 -doc """
 Gets a range of key-value pairs. Executes a reducing function as the pairs are retrieved.
-
-> #### Tip {: .tip}
->
-> Use `get_range/5` with `wait_for_all_interleaving/2` instead.
 """.
 -endif.
 -spec fold_range(tx_object(), key(), key(), function(), any(), [fold_option()]) ->
@@ -1390,16 +1264,12 @@ fold_range_wait(Tx, FF, Fun, Acc) ->
 -if(?DOCATTRS).
 -doc """
 Retrieves results from a `t:fold_future/0`. Executes a reducing function as the pairs are retrieved.
-
-> #### Tip {: .tip}
->
-> Use `wait_for_all_interleaving/2` instead.
 """.
 -endif.
 -spec fold_range_wait(transaction() | snapshot(), fold_future(), function(), any(), [wait_option()]) ->
     any().
 fold_range_wait(?IS_TX = Tx, ?IS_FOLD_FUTURE = FF, Fun, Acc, Options) ->
-    wait_and_apply(Tx, [FF], Fun, Acc, Options);
+    wait_and_apply(Tx, FF, Fun, Acc, Options);
 fold_range_wait(?IS_SS = SS, ?IS_FOLD_FUTURE = FF, Fun, Acc, Options) ->
     fold_range_wait(?GET_TX(SS), FF, Fun, Acc, Options).
 
@@ -2149,54 +2019,31 @@ do_transaction(?IS_TX = Tx, UserFun, Depth) ->
     any().
 folding_get_range_and_wait(?IS_TX = Tx, StartKey, EndKey, Fun, Acc, Options) ->
     St = options_to_fold_st(StartKey, EndKey, Options),
-    fold_interleaving_and_wait(Tx, [St], Fun, Acc, Options).
-
--spec fold_interleaving_and_wait(transaction(), [#fold_st{}], function(), any(), [wait_option()]) ->
-    any().
-fold_interleaving_and_wait(Tx, Sts = [#fold_st{} | _], Fun, Acc, Options) ->
-    FFs = [folding_get_future(Tx, St) || St = #fold_st{} <- Sts],
-
-    wait_and_apply(Tx, FFs, Fun, Acc, Options).
+    wait_and_apply(Tx, folding_get_future(Tx, St), Fun, Acc, Options).
 
 -spec wait_and_apply(
-    transaction() | snapshot(), [fold_future()], function(), any(), [
+    transaction(), fold_future(), function(), any(), [
         wait_option()
     ]
 ) -> any().
-wait_and_apply(Tx, FFs, Fun, Acc, Options) ->
-    Sts = [St || #fold_future{st = St} <- FFs],
-
-    {NewSts, NewAcc} = lists:foldl(
-        fun
-            (#fold_future{future = undefined}, {Sts0, Acc0}) ->
-                {Sts0, Acc0};
-            (FF, {Sts0, Acc0}) ->
-                #fold_future{future = Future, st = St0} = FF,
-                #fold_st{from = From0} = St0,
-                Result = wait(Future, Options),
-                case handle_fold_st_result(FF, Result) of
-                    {ResultTuple, NewSt = #fold_st{from = From0}} ->
-                        folding_apply(
-                            lists:keyreplace(From0, #fold_st.from, Sts0, NewSt),
-                            From0,
-                            ResultTuple,
-                            Fun,
-                            Acc0,
-                            Options
-                        );
-                    ResultTuple ->
-                        folding_apply(Sts0, From0, ResultTuple, Fun, Acc0, Options)
-                end
+wait_and_apply(_Tx, #fold_future{future = undefined}, _Fun, Acc, _Options) ->
+    Acc;
+wait_and_apply(Tx, #fold_future{future = Future, st = St} = FF, Fun, Acc, Options) ->
+    Result = wait(Future, Options),
+    {NewSt, NewAcc} =
+        case handle_fold_st_result(FF, Result) of
+            {ResultTuple, St0 = #fold_st{}} ->
+                folding_apply(St0, ResultTuple, Fun, Acc, Options);
+            ResultTuple ->
+                folding_apply(St, ResultTuple, Fun, Acc, Options)
         end,
-        {Sts, Acc},
-        FFs
-    ),
 
-    case NewSts of
-        [] ->
+    case NewSt of
+        undefined ->
             NewAcc;
         _ ->
-            fold_interleaving_and_wait(Tx, NewSts, Fun, NewAcc, Options)
+            NewFF = folding_get_future(Tx, NewSt),
+            wait_and_apply(Tx, NewFF, Fun, NewAcc, Options)
     end.
 
 handle_fold_st_result(?IS_FOLD_FUTURE = FF, {RawRows, Count, HasMore}) ->
@@ -2249,15 +2096,13 @@ handle_fold_st_result(?IS_FOLD_FUTURE = FF, {RawRows, Count, HasMore}) ->
 handle_fold_st_result(?IS_FOLD_FUTURE, Result) ->
     {done, Result}.
 
--spec folding_apply(list(#fold_st{}), future(), {more | done, any()}, function(), any(), [
+-spec folding_apply(#fold_st{}, {more | done, any()}, function(), any(), [
     wait_option()
-]) -> {list(#fold_st{}), any()}.
-folding_apply(Sts0, Ref0, {more, Result0}, Fun, Acc0, Options) ->
-    #fold_st{idx = Idx} = lists:keyfind(Ref0, #fold_st.from, Sts0),
-    {Sts0, (fold_wrap(Fun, Idx, Options))(Result0, Acc0)};
-folding_apply(Sts0, Ref0, {done, Result0}, Fun, Acc0, Options) ->
-    {value, #fold_st{idx = Idx}, Sts1} = lists:keytake(Ref0, #fold_st.from, Sts0),
-    {Sts1, (fold_wrap(Fun, Idx, Options))(Result0, Acc0)}.
+]) -> {#fold_st{} | undefined, any()}.
+folding_apply(St = #fold_st{idx = Idx}, {more, Result0}, Fun, Acc0, Options) ->
+    {St, (fold_wrap(Fun, Idx, Options))(Result0, Acc0)};
+folding_apply(#fold_st{idx = Idx}, {done, Result0}, Fun, Acc0, Options) ->
+    {undefined, (fold_wrap(Fun, Idx, Options))(Result0, Acc0)}.
 
 -spec fold_wrap(function(), undefined | non_neg_integer(), [wait_option()]) -> function().
 fold_wrap(Fun, Idx, Options) ->
@@ -2301,14 +2146,7 @@ folding_get_future(?IS_TX = Tx, #fold_st{mapper = undefined} = St) ->
         Snapshot,
         Reverse
     ),
-
-    NewSt =
-        case St of
-            #fold_st{from = undefined} -> St#fold_st{from = Future};
-            _ -> St
-        end,
-
-    #fold_future{st = NewSt, future = Future};
+    #fold_future{st = St, future = Future};
 folding_get_future(?IS_TX = Tx, #fold_st{} = St) ->
     #fold_st{
         start_key = StartKey,
@@ -2334,14 +2172,7 @@ folding_get_future(?IS_TX = Tx, #fold_st{} = St) ->
         Snapshot,
         Reverse
     ),
-
-    NewSt =
-        case St of
-            #fold_st{from = undefined} -> St#fold_st{from = Future};
-            _ -> St
-        end,
-
-    #fold_future{st = NewSt, future = Future}.
+    #fold_future{st = St, future = Future}.
 
 -spec options_to_fold_st(key(), key(), [fold_option()]) -> #fold_st{}.
 options_to_fold_st(StartKey, EndKey, Options) ->
@@ -2360,8 +2191,7 @@ options_to_fold_st(StartKey, EndKey, Options) ->
         streaming_mode = erlfdb_util:get(Options, streaming_mode, want_all),
         iteration = erlfdb_util:get(Options, iteration, 1),
         snapshot = erlfdb_util:get(Options, snapshot, false),
-        reverse = Reverse,
-        from = undefined
+        reverse = Reverse
     }.
 
 -spec flush_future_message(future()) -> ok.

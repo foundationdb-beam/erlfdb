@@ -1,31 +1,40 @@
 diff --git a/bindings/bindingtester/__init__.py b/bindings/bindingtester/__init__.py
-index bfe569e27..5db968e89 100644
+index 068935798e..7ab8d56ae2 100644
 --- a/bindings/bindingtester/__init__.py
 +++ b/bindings/bindingtester/__init__.py
-@@ -22,7 +22,7 @@ import math
- import sys
+@@ -23,9 +23,7 @@ import sys
  import os
+ import util
  
--sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+-sys.path[:0] = [
+-    os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
+-]
 +sys.path[:0] = ['USER_SITE_PATH']
  
- import util
  from fdb import LATEST_API_VERSION
+ 
 diff --git a/bindings/bindingtester/known_testers.py b/bindings/bindingtester/known_testers.py
-index 30a0b72fa..22ad4e249 100644
+index 615d173a6a..25e6c8ea77 100644
 --- a/bindings/bindingtester/known_testers.py
 +++ b/bindings/bindingtester/known_testers.py
-@@ -67,4 +67,5 @@ testers = {
-     'java_async': Tester('java', _java_cmd + 'AsyncStackTester', 2040, 510, MAX_API_VERSION, types=ALL_TYPES, tenants_enabled=True),
-     'go': Tester('go', _absolute_path('go/build/bin/_stacktester'), 2040, 200, MAX_API_VERSION, types=ALL_TYPES),
-     'flow': Tester('flow', _absolute_path('flow/bin/fdb_flow_tester'), 63, 500, MAX_API_VERSION, directory_snapshot_ops_enabled=False),
-+    'erlang': Tester('erlang', './test/bindingtester/tester.es', 2040, 730, MAX_API_VERSION, types=ALL_TYPES, tenants_enabled=False)
+@@ -133,4 +133,12 @@ testers = {
+         MAX_API_VERSION,
+         directory_snapshot_ops_enabled=False,
+     ),
++    "erlang": Tester(
++        "erlang",
++        "./test/bindingtester/tester.es",
++        2040,
++        730,
++        MAX_API_VERSION,
++        types=ALL_TYPES,
++    ),
  }
 diff --git a/bindings/python/tests/tester.py b/bindings/python/tests/tester.py
-index a856727b4..49f6cb5a4 100644
+index 950904a797..7de0d0d6f7 100644
 --- a/bindings/python/tests/tester.py
 +++ b/bindings/python/tests/tester.py
-@@ -27,7 +27,7 @@ import struct
+@@ -26,7 +26,7 @@ import struct
  import sys
  import threading
  
